@@ -21,7 +21,7 @@ from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 
-GO2_PENDULUM_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_pendulum", "go2_pendulum_robot.usd")
+GO2_PENDULUM_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_pendulum", "go2_pendulum.usd")
 
 GO2_PENDULUM_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
