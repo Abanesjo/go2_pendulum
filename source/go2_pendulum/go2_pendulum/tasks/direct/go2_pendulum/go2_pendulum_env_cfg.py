@@ -33,7 +33,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # - spaces definition
     action_scale = 0.25
     action_space = 12
-    observation_space = 239
+    observation_space = 241
     state_space = 0
     debug_vis = True
     use_height_scan = True
@@ -83,6 +83,10 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_angle_min = 0.0 * math.pi / 180.0
     pendulum_angle_max = 9.9 * math.pi / 180.0
     pendulum_terminate_angle_rad = 60.0 * math.pi / 180.0
+    pendulum_assist_level_threshold = 2
+    pendulum_assist_kp = 40.0
+    pendulum_assist_kd = 1.0
+    pendulum_assist_torque_limit = 50.0
 
     # simulation
     sim: SimulationCfg = SimulationCfg(

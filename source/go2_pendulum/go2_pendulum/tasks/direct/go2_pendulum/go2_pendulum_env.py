@@ -82,6 +82,12 @@ class Go2PendulumEnv(DirectRLEnv):
             self._pendulum_dof_ids.append(joint_idx[0])
         self._pendulum_dof_ids = torch.tensor(self._pendulum_dof_ids, device=self.device, dtype=torch.long)
 
+        pendulum_ee_ids, _ = self.robot.find_bodies("pendulum_ee")
+        if len(pendulum_ee_ids) != 1:
+            raise RuntimeError(f"Expected exactly one body for 'pendulum_ee', got {pendulum_ee_ids}.")
+        self._pendulum_ee_id = pendulum_ee_ids[0]
+        self._world_up = torch.tensor([0.0, 0.0, 1.0], device=self.device)
+
         # Joint position command (deviation from default joint positions).
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
         self._previous_actions = torch.zeros(
@@ -199,6 +205,17 @@ class Go2PendulumEnv(DirectRLEnv):
             -self.torque_limits,
             self.torque_limits,
         )
+        assist_mask = self._get_pendulum_assist_mask()
+        if assist_mask.any():
+            pendulum_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
+            pendulum_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
+            assist_torque = -self.cfg.pendulum_assist_kp * pendulum_pos - self.cfg.pendulum_assist_kd * pendulum_vel
+            assist_torque = torch.clip(
+                assist_torque,
+                -self.cfg.pendulum_assist_torque_limit,
+                self.cfg.pendulum_assist_torque_limit,
+            )
+            torques[assist_mask, self._pendulum_dof_ids] = assist_torque[assist_mask]
         self.robot.set_joint_effort_target(torques)
 
     def _get_observations(self) -> dict:
@@ -210,8 +227,9 @@ class Go2PendulumEnv(DirectRLEnv):
             ).clip(-1.0, 1.0)
         leg_joint_pos = self.robot.data.joint_pos[:, self._leg_dof_ids] - self.robot.data.default_joint_pos[:, self._leg_dof_ids]
         leg_joint_vel = self.robot.data.joint_vel[:, self._leg_dof_ids]
-        pendulum_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
-        pendulum_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
+        pendulum_quat_w = self.robot.data.body_quat_w[:, self._pendulum_ee_id]
+        pendulum_up = math_utils.quat_apply(pendulum_quat_w, self._world_up)
+        pendulum_ang_vel = self.robot.data.body_ang_vel_w[:, self._pendulum_ee_id]
 
         policy_tensors = [
             self.robot.data.root_lin_vel_b,
@@ -220,8 +238,8 @@ class Go2PendulumEnv(DirectRLEnv):
             self._commands,
             leg_joint_pos,
             leg_joint_vel,
-            pendulum_pos,
-            pendulum_vel,
+            pendulum_up,
+            pendulum_ang_vel,
         ]
         if self.cfg.use_height_scan:
             if height_data is None:
@@ -241,8 +259,8 @@ class Go2PendulumEnv(DirectRLEnv):
                     self._commands,
                     leg_joint_pos,
                     leg_joint_vel,
-                    pendulum_pos,
-                    pendulum_vel,
+                    pendulum_up,
+                    pendulum_ang_vel,
                     height_data,
                     self._actions,
                 ],
@@ -289,12 +307,14 @@ class Go2PendulumEnv(DirectRLEnv):
             dim=1,
         )
 
-        # pendulum rewards
-        pendulum_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
-        pendulum_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
-        pendulum_norm = torch.linalg.norm(pendulum_pos, dim=-1)
-        pendulum_vel_norm = torch.linalg.norm(pendulum_vel, dim=-1)
-        pendulum_upright_reward = torch.exp(-pendulum_norm)
+        # pendulum rewards from end-effector alignment in world frame
+        pendulum_quat_w = self.robot.data.body_quat_w[:, self._pendulum_ee_id]
+        pendulum_up = math_utils.quat_apply(pendulum_quat_w, self._world_up)
+        cos_tilt = torch.clamp(torch.sum(pendulum_up * self._world_up, dim=1), -1.0, 1.0)
+        pendulum_tilt = torch.acos(cos_tilt)
+        pendulum_ang_vel = self.robot.data.body_ang_vel_w[:, self._pendulum_ee_id]
+        pendulum_vel_norm = torch.linalg.norm(pendulum_ang_vel, dim=-1)
+        pendulum_upright_reward = torch.exp(-pendulum_tilt)
         pendulum_velocity_reward = torch.exp(-pendulum_vel_norm)
 
         self.last_actions = torch.roll(self.last_actions, 1, 2)
@@ -386,8 +406,11 @@ class Go2PendulumEnv(DirectRLEnv):
         contact_grace = self.episode_length_buf > math.ceil(self.cfg.base_contact_grace_s / self.step_dt)
         cstr_termination_contacts = cstr_termination_contacts & contact_grace
 
-        pendulum_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
-        pendulum_terminated = torch.any(torch.abs(pendulum_pos) > self.cfg.pendulum_terminate_angle_rad, dim=1)
+        pendulum_quat_w = self.robot.data.body_quat_w[:, self._pendulum_ee_id]
+        pendulum_up = math_utils.quat_apply(pendulum_quat_w, self._world_up)
+        cos_tilt = torch.clamp(torch.sum(pendulum_up * self._world_up, dim=1), -1.0, 1.0)
+        pendulum_tilt = torch.acos(cos_tilt)
+        pendulum_terminated = pendulum_tilt > self.cfg.pendulum_terminate_angle_rad
 
         self._base_contact_terminated = cstr_termination_contacts
         terminated = cstr_termination_contacts | pendulum_terminated
@@ -753,3 +776,10 @@ class Go2PendulumEnv(DirectRLEnv):
         reward = torch.sum(torch.square(err_raibert_heuristic), dim=(1, 2))
 
         return reward
+
+    def _get_pendulum_assist_mask(self) -> torch.Tensor:
+        if self.cfg.pendulum_assist_level_threshold <= 0:
+            return torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        if self._terrain.terrain_origins is None or not hasattr(self._terrain, "terrain_levels"):
+            return torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        return self._terrain.terrain_levels < self.cfg.pendulum_assist_level_threshold
