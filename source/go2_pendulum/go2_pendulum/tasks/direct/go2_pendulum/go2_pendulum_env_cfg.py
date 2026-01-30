@@ -108,7 +108,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     lin_vel_z_reward_scale = -2.0
     dof_vel_reward_scale = -0.0001
     ang_vel_xy_reward_scale = -0.05
-    pendulum_upright_reward_scale = 2.0
+    pendulum_upright_reward_scale = 1.0
     pendulum_vel_reward_scale = 1.0
 
     # command generation
@@ -121,8 +121,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
-    pendulum_angle_min = 0.0 * math.pi / 180.0
-    pendulum_angle_max = 9.9 * math.pi / 180.0
+    pendulum_angle_min = -9.0 * math.pi / 180.0
+    pendulum_angle_max = 9.0 * math.pi / 180.0
     pendulum_terminate_angle_rad = 60.0 * math.pi / 180.0
 
     # terrain scaling
