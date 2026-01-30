@@ -95,6 +95,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # early stopping
     base_contact_grace_s = 0.0
     termination_penalty = -100.0
+    pendulum_contact_force_threshold = 1.0
 
     # reward scales
     lin_vel_reward_scale = 1.5
@@ -171,6 +172,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*", history_length=3, update_period=0.005, track_air_time=True
+    )
+    pendulum_contact_sensor: ContactSensorCfg = ContactSensorCfg(
+        prim_path="/World/envs/env_.*/Robot/pendulum_ee", history_length=1, update_period=0.005, track_air_time=False
     )
     height_scanner = RayCasterCfg(
         prim_path="/World/envs/env_.*/Robot/base",

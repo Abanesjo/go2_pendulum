@@ -156,9 +156,11 @@ class Go2PendulumEnv(DirectRLEnv):
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
+        self._pendulum_contact_sensor = ContactSensor(self.cfg.pendulum_contact_sensor)
         # register assets and sensors so they get replicated and updated
         self.scene.articulations["robot"] = self.robot
         self.scene.sensors["contact_sensor"] = self._contact_sensor
+        self.scene.sensors["pendulum_contact_sensor"] = self._pendulum_contact_sensor
         self._height_scanner = None
         if self.cfg.enable_height_scanner and self.cfg.height_scanner is not None:
             self._height_scanner = RayCaster(self.cfg.height_scanner)
@@ -386,8 +388,14 @@ class Go2PendulumEnv(DirectRLEnv):
         contact_grace = self.episode_length_buf > math.ceil(self.cfg.base_contact_grace_s / self.step_dt)
         cstr_termination_contacts = cstr_termination_contacts & contact_grace
 
+        pendulum_contact_forces = self._pendulum_contact_sensor.data.net_forces_w
+        pendulum_contact = torch.any(
+            torch.norm(pendulum_contact_forces, dim=-1) > self.cfg.pendulum_contact_force_threshold,
+            dim=1,
+        )
+
         self._base_contact_terminated = cstr_termination_contacts
-        terminated = cstr_termination_contacts
+        terminated = cstr_termination_contacts | pendulum_contact
         return terminated, time_out
 
     def _update_terrain_curriculum(self, env_ids: torch.Tensor) -> None:
