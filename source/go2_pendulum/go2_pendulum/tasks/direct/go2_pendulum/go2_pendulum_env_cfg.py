@@ -124,10 +124,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_angle_min = 0.0 * math.pi / 180.0
     pendulum_angle_max = 9.9 * math.pi / 180.0
     pendulum_terminate_angle_rad = 60.0 * math.pi / 180.0
-    pendulum_assist_level_threshold = 2
-    pendulum_assist_kp = 40.0
-    pendulum_assist_kd = 1.0
-    pendulum_assist_torque_limit = 50.0
+
+    # terrain scaling
+    terrain_scale = 0.8
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
@@ -216,7 +215,47 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
         # Increase GPU rigid patch buffer to avoid PhysX patch overflow.
         self.sim.physx.gpu_max_rigid_patch_count = 2**18
         if self.terrain.terrain_generator is not None:
-            self.terrain.terrain_generator.curriculum = True
-        self.terrain.terrain_generator.sub_terrains["boxes"].grid_height_range = (0.025, 0.1)
-        self.terrain.terrain_generator.sub_terrains["random_rough"].noise_range = (0.01, 0.06)
-        self.terrain.terrain_generator.sub_terrains["random_rough"].noise_step = 0.01
+            terrain_gen = self.terrain.terrain_generator
+            terrain_gen.curriculum = True
+            scale = self.terrain_scale
+            terrain_gen.size = tuple(dim * scale for dim in terrain_gen.size)
+            terrain_gen.border_width *= scale
+            terrain_gen.horizontal_scale *= scale
+            terrain_gen.vertical_scale *= scale
+
+            def _scale_range(value_range: tuple[float, float]) -> tuple[float, float]:
+                return (value_range[0] * scale, value_range[1] * scale)
+
+            sub_terrains = terrain_gen.sub_terrains
+            if "pyramid_stairs" in sub_terrains:
+                sub_terrains["pyramid_stairs"].step_height_range = _scale_range(
+                    sub_terrains["pyramid_stairs"].step_height_range
+                )
+                sub_terrains["pyramid_stairs"].step_width *= scale
+                sub_terrains["pyramid_stairs"].platform_width *= scale
+                sub_terrains["pyramid_stairs"].border_width *= scale
+            if "pyramid_stairs_inv" in sub_terrains:
+                sub_terrains["pyramid_stairs_inv"].step_height_range = _scale_range(
+                    sub_terrains["pyramid_stairs_inv"].step_height_range
+                )
+                sub_terrains["pyramid_stairs_inv"].step_width *= scale
+                sub_terrains["pyramid_stairs_inv"].platform_width *= scale
+                sub_terrains["pyramid_stairs_inv"].border_width *= scale
+            if "boxes" in sub_terrains:
+                sub_terrains["boxes"].grid_width *= scale
+                sub_terrains["boxes"].grid_height_range = _scale_range(sub_terrains["boxes"].grid_height_range)
+                sub_terrains["boxes"].platform_width *= scale
+            if "random_rough" in sub_terrains:
+                sub_terrains["random_rough"].noise_range = _scale_range(sub_terrains["random_rough"].noise_range)
+                sub_terrains["random_rough"].noise_step *= scale
+                sub_terrains["random_rough"].border_width *= scale
+            if "hf_pyramid_slope" in sub_terrains:
+                sub_terrains["hf_pyramid_slope"].platform_width *= scale
+                sub_terrains["hf_pyramid_slope"].border_width *= scale
+            if "hf_pyramid_slope_inv" in sub_terrains:
+                sub_terrains["hf_pyramid_slope_inv"].platform_width *= scale
+                sub_terrains["hf_pyramid_slope_inv"].border_width *= scale
+
+            sub_terrains["boxes"].grid_height_range = (0.025 * scale, 0.1 * scale)
+            sub_terrains["random_rough"].noise_range = (0.01 * scale, 0.06 * scale)
+            sub_terrains["random_rough"].noise_step = 0.01 * scale
