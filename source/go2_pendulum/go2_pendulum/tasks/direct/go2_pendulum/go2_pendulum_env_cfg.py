@@ -57,7 +57,7 @@ GO2_PENDULUM_CFG = ArticulationCfg(
     actuators={
         "base_legs": ImplicitActuatorCfg(
             joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
-            effort_limit=23.5,
+            effort_limit=45.0,
             velocity_limit=30.0,
             stiffness=0.0,
             damping=0.0,
@@ -90,7 +90,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # PD control gains
     Kp = 20.0
     Kd = 0.5
-    torque_limits = 100.0
+    torque_limits = 45.0
 
     # early stopping
     base_contact_grace_s = 0.0
