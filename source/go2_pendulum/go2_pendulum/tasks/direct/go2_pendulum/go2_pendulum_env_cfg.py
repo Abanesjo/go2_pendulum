@@ -84,7 +84,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
-    use_pendulum = False
+    use_pendulum = True
 
     # gait shaping
     raibert_heuristic_reward_scale = 0.0
@@ -202,15 +202,13 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Set the scale of the visualization markers to (0.5, 0.5, 0.5)
     goal_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
     current_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
+    goal_vel_visualizer_cfg.markers["arrow"].visual_material = sim_utils.PreviewSurfaceCfg(
+        diffuse_color=(1.0, 0.0, 0.0)
+    )
 
     target_marker_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
         prim_path="/Visuals/TargetMarkers",
         markers={
-            "target_arrow": sim_utils.UsdFileCfg(
-                usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
-                scale=(0.33, 0.33, 0.33),
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
-            ),
             "target_sphere": sim_utils.SphereCfg(
                 radius=0.1,
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)),
