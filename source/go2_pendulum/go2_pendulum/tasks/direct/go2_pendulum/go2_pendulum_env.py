@@ -637,9 +637,10 @@ class Go2PendulumEnv(DirectRLEnv):
         dist_safe = torch.clamp(dist, min=1e-6)
         direction_unit = delta_xy / dist_safe
 
-        desired_vel_world_xy = direction_unit * self.cfg.command_speed
+        desired_speed = torch.full_like(dist, 1.0)
         close_to_goal = dist.squeeze(-1) <= self.cfg.position_tolerance
-        desired_vel_world_xy[close_to_goal] = 0.0
+        desired_speed[close_to_goal] = 0.3
+        desired_vel_world_xy = direction_unit * desired_speed
 
         _, _, yaw = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)
         yaw_error = math_utils.wrap_to_pi(self.target_state[:, 2] - yaw)
@@ -648,7 +649,6 @@ class Go2PendulumEnv(DirectRLEnv):
             -self.cfg.max_yaw_rate,
             self.cfg.max_yaw_rate,
         )
-        yaw_rate_cmd = yaw_rate_cmd * close_to_goal.float()
 
         vel_world = torch.zeros(self.num_envs, 3, device=self.device)
         vel_world[:, :2] = desired_vel_world_xy
