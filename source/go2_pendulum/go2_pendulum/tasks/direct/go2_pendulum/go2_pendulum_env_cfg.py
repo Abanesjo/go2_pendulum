@@ -102,7 +102,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_contact_force_threshold = 1.0
 
     # reward scales
-    lin_vel_reward_scale = 1.5
+    lin_vel_reward_scale = 10.5
     yaw_rate_reward_scale = 0.75
     action_rate_reward_scale = -0.01
     feet_air_time_reward_scale = 0.01
@@ -117,12 +117,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_vel_reward_scale = 0.01
 
     # command generation
-    command_speed = 0.25
     yaw_kp = 1.0
     max_yaw_rate = 1.0
-    goal_randomization_range = 3.0
+    goal_randomization_range = 5.0
     goal_randomization_angle = math.pi
-    position_tolerance = 0.1
+    position_tolerance = 0.01
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
