@@ -84,7 +84,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
-    use_pendulum = False
+    use_pendulum = True
 
     # gait shaping
     raibert_heuristic_reward_scale = 0.0
@@ -102,7 +102,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_contact_force_threshold = 1.0
 
     # reward scales
-    lin_vel_reward_scale = 10.5
+    lin_vel_reward_scale = 1.5
     yaw_rate_reward_scale = 0.75
     action_rate_reward_scale = -0.01
     feet_air_time_reward_scale = 0.01
@@ -119,9 +119,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # command generation
     yaw_kp = 1.0
     max_yaw_rate = 1.0
-    goal_randomization_range = 5.0
+    goal_randomization_range = 3.0
     goal_randomization_angle = math.pi
-    position_tolerance = 0.01
+    position_tolerance = 0.1
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
@@ -217,6 +217,13 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
+        self.robot_cfg.actuators["base_legs"] = ImplicitActuatorCfg(
+            joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
+            effort_limit=23.5,
+            velocity_limit=30.0,
+            stiffness=0.0,
+            damping=0.0,
+        )
         if not self.use_pendulum:
             self.robot_cfg = self.robot_cfg.replace(
                 spawn=self.robot_cfg.spawn.replace(usd_path=GO2_USD_PATH),
