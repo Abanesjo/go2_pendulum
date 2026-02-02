@@ -120,9 +120,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     command_speed = 0.25
     yaw_kp = 1.0
     max_yaw_rate = 1.0
-    goal_randomization_range = 3.0
+    goal_randomization_range = 5.0
     goal_randomization_angle = math.pi
-    position_tolerance = 0.25
+    position_tolerance = 0.01
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
