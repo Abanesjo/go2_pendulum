@@ -1,6 +1,3 @@
-[submodule "source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/go2_pendulum"]
-	path = source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/go2_pendulum
-	url = https://huggingface.co/datasets/Abanesjo/go2_pendulum
 [submodule "source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/go2_model"]
 	path = source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/go2_model
 	url = https://huggingface.co/datasets/Abanesjo/go2_model
