@@ -74,13 +74,17 @@ class Go2PendulumEnv(DirectRLEnv):
             )
         self._leg_dof_ids = torch.tensor(leg_joint_ids, device=self.device, dtype=torch.long)
 
-        self._pendulum_dof_ids = []
-        for joint_name in self.cfg.pendulum_joint_names:
-            joint_idx, _ = self.robot.find_joints(joint_name)
-            if len(joint_idx) != 1:
-                raise RuntimeError(f"Expected exactly one joint for '{joint_name}', got {joint_idx}.")
-            self._pendulum_dof_ids.append(joint_idx[0])
-        self._pendulum_dof_ids = torch.tensor(self._pendulum_dof_ids, device=self.device, dtype=torch.long)
+        self._pendulum_dof_count = len(self.cfg.pendulum_joint_names)
+        if self.cfg.use_pendulum:
+            self._pendulum_dof_ids = []
+            for joint_name in self.cfg.pendulum_joint_names:
+                joint_idx, _ = self.robot.find_joints(joint_name)
+                if len(joint_idx) != 1:
+                    raise RuntimeError(f"Expected exactly one joint for '{joint_name}', got {joint_idx}.")
+                self._pendulum_dof_ids.append(joint_idx[0])
+            self._pendulum_dof_ids = torch.tensor(self._pendulum_dof_ids, device=self.device, dtype=torch.long)
+        else:
+            self._pendulum_dof_ids = torch.tensor([], device=self.device, dtype=torch.long)
 
         # Joint position command (deviation from default joint positions).
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
@@ -212,8 +216,17 @@ class Go2PendulumEnv(DirectRLEnv):
             ).clip(-1.0, 1.0)
         leg_joint_pos = self.robot.data.joint_pos[:, self._leg_dof_ids] - self.robot.data.default_joint_pos[:, self._leg_dof_ids]
         leg_joint_vel = self.robot.data.joint_vel[:, self._leg_dof_ids]
-        pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
-        pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
+        if self.cfg.use_pendulum:
+            pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
+            pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
+        else:
+            pendulum_joint_pos = torch.zeros(
+                self.num_envs,
+                self._pendulum_dof_count,
+                device=self.device,
+                dtype=self.robot.data.joint_pos.dtype,
+            )
+            pendulum_joint_vel = torch.zeros_like(pendulum_joint_pos)
 
         policy_tensors = [
             self.robot.data.root_lin_vel_b,
@@ -292,12 +305,16 @@ class Go2PendulumEnv(DirectRLEnv):
         )
 
         # pendulum rewards from joint angles/velocities (target is zero)
-        pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
-        pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
-        pendulum_angle_norm = torch.linalg.norm(pendulum_joint_pos, dim=1)
-        pendulum_vel_norm = torch.linalg.norm(pendulum_joint_vel, dim=1)
-        pendulum_upright_reward = torch.exp(-pendulum_angle_norm)
-        pendulum_velocity_reward = torch.exp(-pendulum_vel_norm)
+        if self.cfg.use_pendulum:
+            pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
+            pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
+            pendulum_angle_norm = torch.linalg.norm(pendulum_joint_pos, dim=1)
+            pendulum_vel_norm = torch.linalg.norm(pendulum_joint_vel, dim=1)
+            pendulum_upright_reward = torch.exp(-pendulum_angle_norm)
+            pendulum_velocity_reward = torch.exp(-pendulum_vel_norm)
+        else:
+            pendulum_upright_reward = torch.zeros(self.num_envs, device=self.device)
+            pendulum_velocity_reward = torch.zeros(self.num_envs, device=self.device)
 
         self.last_actions = torch.roll(self.last_actions, 1, 2)
         self.last_actions[:, :, 0] = self._actions[:]

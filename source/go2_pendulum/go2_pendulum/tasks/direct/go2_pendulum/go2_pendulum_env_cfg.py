@@ -6,7 +6,7 @@
 import math
 import os
 
-from isaaclab.actuators import ImplicitActuatorCfg
+from isaaclab.actuators import ImplicitActuatorCfg, DCMotorCfg
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg
@@ -22,6 +22,7 @@ from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 
 GO2_PENDULUM_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_pendulum", "go2_pendulum.usd")
+GO2_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_pendulum", "go2.usd")
 
 GO2_PENDULUM_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
@@ -55,12 +56,14 @@ GO2_PENDULUM_CFG = ArticulationCfg(
     ),
     soft_joint_pos_limit_factor=0.9,
     actuators={
-        "base_legs": ImplicitActuatorCfg(
+        "base_legs": DCMotorCfg(
             joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
-            effort_limit=45.0,
+            effort_limit=23.5,
+            saturation_effort=23.5,
             velocity_limit=30.0,
-            stiffness=0.0,
-            damping=0.0,
+            stiffness=25.0,
+            damping=0.5,
+            friction=0.0,
         ),
     },
 )
@@ -81,6 +84,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
+    use_pendulum = False
 
     # gait shaping
     raibert_heuristic_reward_scale = 0.0
@@ -90,7 +94,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # PD control gains
     Kp = 20.0
     Kd = 0.5
-    torque_limits = 45.0
+    torque_limits = 100.0
 
     # early stopping
     base_contact_grace_s = 0.0
@@ -216,6 +220,15 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
+        if not self.use_pendulum:
+            self.robot_cfg = self.robot_cfg.replace(
+                spawn=self.robot_cfg.spawn.replace(usd_path=GO2_USD_PATH),
+            )
+            self.pendulum_upright_reward_scale = 0.0
+            self.pendulum_vel_reward_scale = 0.0
+            self.pendulum_contact_sensor = self.pendulum_contact_sensor.replace(
+                prim_path="/World/envs/env_.*/Robot/base"
+            )
         # Increase GPU rigid patch buffer to avoid PhysX patch overflow.
         self.sim.physx.gpu_max_rigid_patch_count = 2**18
         if self.terrain.terrain_generator is not None:
