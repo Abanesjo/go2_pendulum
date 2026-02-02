@@ -84,7 +84,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
-    use_pendulum = False
+    use_pendulum = True
 
     # gait shaping
     raibert_heuristic_reward_scale = 0.0
