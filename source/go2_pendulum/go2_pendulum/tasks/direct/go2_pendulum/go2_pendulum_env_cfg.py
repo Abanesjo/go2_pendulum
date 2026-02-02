@@ -84,7 +84,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
-    use_pendulum = True
+    use_pendulum = False
 
     # gait shaping
     raibert_heuristic_reward_scale = 0.0
@@ -113,16 +113,16 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     lin_vel_z_reward_scale = -2.0
     dof_vel_reward_scale = -0.0001
     ang_vel_xy_reward_scale = -0.05
-    pendulum_upright_reward_scale = 1.0
-    pendulum_vel_reward_scale = 1.0
+    pendulum_upright_reward_scale = 0.01
+    pendulum_vel_reward_scale = 0.01
 
     # command generation
     command_speed = 0.25
     yaw_kp = 1.0
     max_yaw_rate = 1.0
-    goal_randomization_range = 5.0
+    goal_randomization_range = 3.0
     goal_randomization_angle = math.pi
-    position_tolerance = 0.01
+    position_tolerance = 0.1
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
