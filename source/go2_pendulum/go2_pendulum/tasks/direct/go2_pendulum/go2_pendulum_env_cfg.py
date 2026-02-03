@@ -126,7 +126,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_terminate_angle_rad = 60.0 * math.pi / 180.0
 
     # terrain scaling
-    terrain_scale = 0.8
+    terrain_scale = 0.5
 
     # simulation
     sim: SimulationCfg = SimulationCfg(

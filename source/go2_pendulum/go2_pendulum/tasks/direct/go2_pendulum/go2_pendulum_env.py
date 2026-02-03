@@ -125,8 +125,16 @@ class Go2PendulumEnv(DirectRLEnv):
                 "termination_penalty",
                 "dof_torques_l2",
                 "dof_acc_l2",
+                "torque_sat_frac",
             ]
         }
+
+        # Effort limit for saturation logging (used by DC motor model).
+        base_legs_actuator = self.cfg.robot_cfg.actuators.get("base_legs")
+        effort_limit = None if base_legs_actuator is None else base_legs_actuator.effort_limit
+        if effort_limit is None:
+            effort_limit = float("inf")
+        self._leg_effort_limit = torch.tensor(effort_limit, device=self.device, dtype=torch.float32)
 
         # Track termination causes for accurate logging.
         self._base_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -361,6 +369,14 @@ class Go2PendulumEnv(DirectRLEnv):
         # joint torques and accelerations
         rew_dof_torques_l2 = torch.sum(torch.square(self.robot.data.applied_torque[:, self._leg_dof_ids]), dim=1)
         rew_dof_acc_l2 = torch.sum(torch.square(self.robot.data.joint_acc[:, self._leg_dof_ids]), dim=1)
+        if torch.isfinite(self._leg_effort_limit):
+            torque_sat_frac = torch.mean(
+                (torch.abs(self.robot.data.applied_torque[:, self._leg_dof_ids]) >= 0.95 * self._leg_effort_limit)
+                .float(),
+                dim=1,
+            )
+        else:
+            torque_sat_frac = torch.zeros(self.num_envs, device=self.device)
 
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale,
@@ -382,6 +398,7 @@ class Go2PendulumEnv(DirectRLEnv):
             "termination_penalty": rew_termination_penalty,
             "dof_torques_l2": rew_dof_torques_l2 * self.cfg.dof_torques_reward_scale,
             "dof_acc_l2": rew_dof_acc_l2 * self.cfg.dof_accel_reward_scale,
+            "torque_sat_frac": torque_sat_frac,
         }
 
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
