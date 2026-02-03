@@ -575,7 +575,7 @@ class Go2PendulumEnv(DirectRLEnv):
         # get marker location
         # -- base state
         base_pos_w = self.robot.data.root_pos_w.clone()
-        base_pos_w[:, 2] += 0.5
+        # Place velocity arrows at the base frame height.
         # -- resolve the scales and quaternions
         vel_des_arrow_scale, vel_des_arrow_quat = self._resolve_xy_velocity_to_arrow(self._commands[:, :2])
         vel_arrow_scale, vel_arrow_quat = self._resolve_xy_velocity_to_arrow(self.robot.data.root_lin_vel_b[:, :2])
@@ -630,28 +630,21 @@ class Go2PendulumEnv(DirectRLEnv):
 
         target_pos_3d = torch.zeros_like(robot_pos_3d)
         target_pos_3d[:, :2] = target_pos_world
-        target_pos_3d[:, 2] = robot_pos_3d[:, 2]
+        target_pos_3d[:, 2] = env_origins[:, 2]
+        robot_pos_3d = robot_pos_3d.clone()
+        robot_pos_3d[:, 2] = env_origins[:, 2]
         midpoint = (robot_pos_3d + target_pos_3d) / 2.0
         self._marker_locations = midpoint
 
-        loc = self._marker_locations + self._marker_offset
         sphere_locations = torch.zeros_like(self._marker_locations)
         sphere_locations[:, :2] = target_pos_world
-        sphere_locations[:, 2] = robot_pos_3d[:, 2]
+        sphere_locations[:, 2] = env_origins[:, 2]
         sphere_loc = sphere_locations + self._marker_offset
 
         sphere_orientations = torch.zeros((self.num_envs, 4), device=self.device)
         sphere_orientations[:, 3] = 1.0
 
-        all_locations = torch.vstack((loc, sphere_loc))
-        all_orientations = torch.vstack((self._marker_orientations, sphere_orientations))
-
-        all_envs = torch.arange(self.num_envs, device=self.device)
-        arrow_indices = torch.zeros_like(all_envs)
-        sphere_indices = torch.ones_like(all_envs)
-        marker_indices = torch.hstack((arrow_indices, sphere_indices))
-
-        self.target_visualizer.visualize(all_locations, all_orientations, marker_indices=marker_indices)
+        self.target_visualizer.visualize(sphere_loc, sphere_orientations)
 
     def _update_commands(self) -> None:
         if not self.cfg.tracking_mode:

@@ -85,7 +85,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     height_scan_debug_vis = False
     return_teacher_obs = False
     use_pendulum = True
-    tracking_mode = False
+    tracking_mode = True
+    rough_terrain = False
 
     # gait shaping
     raibert_heuristic_reward_scale = 0.0
@@ -119,7 +120,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     max_linear_speed = 0.7
     goal_randomization_range = 3.0
     goal_randomization_angle = math.pi
-    position_tolerance = 0.1
+    position_tolerance = 0.01
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
@@ -215,6 +216,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
+        if not self.rough_terrain:
+            self.terrain = self.terrain.replace(terrain_type="plane", terrain_generator=None)
         if not self.use_pendulum:
             self.robot_cfg = self.robot_cfg.replace(
                 spawn=self.robot_cfg.spawn.replace(usd_path=GO2_USD_PATH),
