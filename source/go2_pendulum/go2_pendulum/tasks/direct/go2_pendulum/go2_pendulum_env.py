@@ -108,8 +108,8 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_sums = {
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
             for key in [
-                "track_lin_vel_xy_exp",
-                "track_ang_vel_z_exp",
+                "position",
+                "yaw_alignment",
                 "pendulum_upright",
                 "pendulum_velocity",
                 "balanced_movement",
@@ -271,13 +271,42 @@ class Go2PendulumEnv(DirectRLEnv):
             observations["teacher"] = teacher_obs
         return observations
 
+    def _compute_body_frame_errors(self) -> tuple[torch.Tensor, torch.Tensor]:
+        root_pos = self.robot.data.root_pos_w
+        root_quat = self.robot.data.root_quat_w
+        env_origins = self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
+        base_pos_xy = root_pos[:, :2] - env_origins[:, :2]
+
+        if self.target_state is not None:
+            target_xy = self.target_state[:, :2]
+        else:
+            target_xy = torch.zeros((self.num_envs, 2), device=self.device)
+
+        position_error_xy = target_xy - base_pos_xy
+        position_error_w = root_pos.new_zeros((self.num_envs, 3))
+        position_error_w[:, :2] = position_error_xy
+        position_error_b = math_utils.quat_apply_inverse(root_quat, position_error_w)
+        position_error_b_xy = position_error_b[:, :2]
+
+        direction_norm = torch.linalg.norm(position_error_xy, dim=-1, keepdim=True)
+        direction_norm = torch.clamp(direction_norm, min=1e-6)
+        direction_unit = position_error_xy / direction_norm
+        target_heading_w = root_pos.new_zeros((self.num_envs, 3))
+        target_heading_w[:, :2] = direction_unit
+        target_heading_b = math_utils.quat_apply_inverse(root_quat, target_heading_w)
+        yaw_error = torch.atan2(target_heading_b[:, 1], target_heading_b[:, 0])
+
+        return position_error_b_xy, yaw_error
+
     def _get_rewards(self) -> torch.Tensor:
-        # linear velocity tracking
-        lin_vel_error = torch.sum(torch.square(self._commands[:, :2] - self.robot.data.root_lin_vel_b[:, :2]), dim=1)
-        lin_vel_error_mapped = torch.exp(-lin_vel_error / 0.25)
-        # yaw rate tracking
-        yaw_rate_error = torch.square(self._commands[:, 2] - self.robot.data.root_ang_vel_b[:, 2])
-        yaw_rate_error_mapped = torch.exp(-yaw_rate_error / 0.25)
+        # position and yaw alignment tracking (body frame)
+        position_error_b_xy, yaw_error = self._compute_body_frame_errors()
+        if self.target_state is not None:
+            position_deviation = torch.linalg.norm(position_error_b_xy, dim=-1)
+            position_reward = torch.exp(-position_deviation)
+        else:
+            position_reward = torch.ones(self.num_envs, device=self.device)
+        yaw_alignment_reward = torch.exp(-torch.abs(yaw_error))
 
         rew_action_rate = torch.sum(
             torch.square(self._actions - self.last_actions[:, :, 0]),
@@ -386,8 +415,8 @@ class Go2PendulumEnv(DirectRLEnv):
             torque_sat_frac = torch.zeros(self.num_envs, device=self.device)
 
         rewards = {
-            "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale,
-            "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale,
+            "position": position_reward * self.cfg.position_reward_scale,
+            "yaw_alignment": yaw_alignment_reward * self.cfg.yaw_alignment_reward_scale,
             "pendulum_upright": pendulum_upright_reward * self.cfg.pendulum_upright_reward_scale,
             "pendulum_velocity": pendulum_velocity_reward * self.cfg.pendulum_vel_reward_scale,
             "balanced_movement": balanced_movement_reward * balanced_movement_scale,
@@ -477,15 +506,9 @@ class Go2PendulumEnv(DirectRLEnv):
             goal_range = self.cfg.goal_randomization_range
             goal_noise_x = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
             goal_noise_y = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
-            goal_yaw = sample_uniform(
-                -self.cfg.goal_randomization_angle,
-                self.cfg.goal_randomization_angle,
-                (num_reset_envs,),
-                self.device,
-            )
             self.target_state[env_ids, 0] = goal_noise_x
             self.target_state[env_ids, 1] = goal_noise_y
-            self.target_state[env_ids, 2] = goal_yaw
+            self.target_state[env_ids, 2] = 0.0
         else:
             self.target_state = None
             self._commands[env_ids] = torch.zeros_like(self._commands[env_ids]).uniform_(-1.0, 1.0)
@@ -636,6 +659,7 @@ class Go2PendulumEnv(DirectRLEnv):
         midpoint = (robot_pos_3d + target_pos_3d) / 2.0
         self._marker_locations = midpoint
 
+        loc = self._marker_locations + self._marker_offset
         sphere_locations = torch.zeros_like(self._marker_locations)
         sphere_locations[:, :2] = target_pos_world
         sphere_locations[:, 2] = env_origins[:, 2]
@@ -644,7 +668,15 @@ class Go2PendulumEnv(DirectRLEnv):
         sphere_orientations = torch.zeros((self.num_envs, 4), device=self.device)
         sphere_orientations[:, 3] = 1.0
 
-        self.target_visualizer.visualize(sphere_loc, sphere_orientations)
+        all_locations = torch.vstack((loc, sphere_loc))
+        all_orientations = torch.vstack((self._marker_orientations, sphere_orientations))
+
+        all_envs = torch.arange(self.num_envs, device=self.device)
+        arrow_indices = torch.zeros_like(all_envs)
+        sphere_indices = torch.ones_like(all_envs)
+        marker_indices = torch.hstack((arrow_indices, sphere_indices))
+
+        self.target_visualizer.visualize(all_locations, all_orientations, marker_indices=marker_indices)
 
     def _update_commands(self) -> None:
         if not self.cfg.tracking_mode:
@@ -666,7 +698,8 @@ class Go2PendulumEnv(DirectRLEnv):
         desired_vel_world_xy = direction_unit * desired_speed
 
         _, _, yaw = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)
-        yaw_error = math_utils.wrap_to_pi(self.target_state[:, 2] - yaw)
+        desired_yaw = torch.atan2(delta_xy[:, 1], delta_xy[:, 0])
+        yaw_error = math_utils.wrap_to_pi(desired_yaw - yaw)
         yaw_rate_cmd = torch.clamp(
             yaw_error * self.cfg.yaw_kp,
             -self.cfg.max_yaw_rate,

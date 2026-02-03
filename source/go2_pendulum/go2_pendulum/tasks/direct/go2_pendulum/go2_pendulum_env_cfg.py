@@ -99,8 +99,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_contact_force_threshold = 1.0
 
     # reward scales
-    lin_vel_reward_scale = 1.5
-    yaw_rate_reward_scale = 0.75
+    position_reward_scale = 0.5
+    yaw_alignment_reward_scale = 0.5
     action_rate_reward_scale = -0.01
     feet_air_time_reward_scale = 0.01
     undesired_contact_reward_scale = -1.0
@@ -207,6 +207,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     target_marker_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
         prim_path="/Visuals/TargetMarkers",
         markers={
+            "target_arrow": sim_utils.UsdFileCfg(
+                usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
+                scale=(0.33, 0.33, 0.33),
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0)),
+            ),
             "target_sphere": sim_utils.SphereCfg(
                 radius=0.1,
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)),
