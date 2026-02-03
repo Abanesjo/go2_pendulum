@@ -84,8 +84,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
-    use_pendulum = True
-    tracking_mode = True
+    use_pendulum = False
+    tracking_mode = False
 
     # gait shaping
     raibert_heuristic_reward_scale = 0.0
@@ -118,7 +118,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     max_linear_speed = 0.7
     goal_randomization_range = 3.0
     goal_randomization_angle = math.pi
-    position_tolerance = 0.05
+    position_tolerance = 0.1
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
