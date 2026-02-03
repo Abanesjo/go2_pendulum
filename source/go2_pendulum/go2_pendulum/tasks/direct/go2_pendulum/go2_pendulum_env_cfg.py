@@ -19,7 +19,6 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.markers import VisualizationMarkersCfg
-from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 
 GO2_PENDULUM_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_model", "go2_pendulum.usd")
 GO2_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_model", "go2.usd")
@@ -113,10 +112,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_vel_reward_scale = 2.0
     balanced_movement_reward_scale = 4.0
 
-    # command generation
-    yaw_kp = 1.0
-    max_yaw_rate = 0.5
-    max_linear_speed = 0.7
+    # goal generation
     goal_randomization_range = 3.0
     goal_randomization_angle = math.pi
     position_tolerance = 0.01
@@ -184,23 +180,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
         pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
-    )
-
-    goal_vel_visualizer_cfg: VisualizationMarkersCfg = GREEN_ARROW_X_MARKER_CFG.replace(
-        prim_path="/Visuals/Command/velocity_goal"
-    )
-    """The configuration for the goal velocity visualization marker. Defaults to GREEN_ARROW_X_MARKER_CFG."""
-
-    current_vel_visualizer_cfg: VisualizationMarkersCfg = BLUE_ARROW_X_MARKER_CFG.replace(
-        prim_path="/Visuals/Command/velocity_current"
-    )
-    """The configuration for the current velocity visualization marker. Defaults to BLUE_ARROW_X_MARKER_CFG."""
-
-    # Set the scale of the visualization markers to (0.5, 0.5, 0.5)
-    goal_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
-    current_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
-    goal_vel_visualizer_cfg.markers["arrow"].visual_material = sim_utils.PreviewSurfaceCfg(
-        diffuse_color=(1.0, 0.0, 0.0)
     )
 
     target_marker_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(

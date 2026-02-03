@@ -92,9 +92,6 @@ class Go2PendulumEnv(DirectRLEnv):
             self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device
         )
 
-        # X/Y linear velocity and yaw angular velocity commands.
-        self._commands = torch.zeros(self.num_envs, 3, device=self.device)
-
         # Target state [x_d, y_d, yaw_d] in environment frame (randomized per reset).
         self.target_state = None
 
@@ -201,7 +198,7 @@ class Go2PendulumEnv(DirectRLEnv):
             self.robot.data.default_joint_pos[:, self._leg_dof_ids] + self._processed_actions
         )
 
-        self._update_commands()
+        # No velocity command generation in position tracking mode.
 
     def _apply_action(self) -> None:
         # Send position targets; actuator model handles PD and torque limits.
@@ -231,11 +228,14 @@ class Go2PendulumEnv(DirectRLEnv):
             )
             pendulum_joint_vel = torch.zeros_like(pendulum_joint_pos)
 
+        position_error_b_xy, yaw_error = self._compute_body_frame_errors()
+        state_error = torch.cat([position_error_b_xy, yaw_error.unsqueeze(-1)], dim=-1)
+
         policy_tensors = [
             self.robot.data.root_lin_vel_b,
             self.robot.data.root_ang_vel_b,
             self.robot.data.projected_gravity_b,
-            self._commands,
+            state_error,
             leg_joint_pos,
             leg_joint_vel,
             pendulum_joint_pos,
@@ -256,7 +256,7 @@ class Go2PendulumEnv(DirectRLEnv):
                     self.robot.data.root_lin_vel_b,
                     self.robot.data.root_ang_vel_b,
                     self.robot.data.projected_gravity_b,
-                    self._commands,
+                    state_error,
                     leg_joint_pos,
                     leg_joint_vel,
                     pendulum_joint_pos,
@@ -381,7 +381,7 @@ class Go2PendulumEnv(DirectRLEnv):
         first_contact = self._contact_sensor.compute_first_contact(self.step_dt)[:, self._feet_ids_sensor]
         last_air_time = self._contact_sensor.data.last_air_time[:, self._feet_ids_sensor]
         rew_feet_air_time = torch.sum((last_air_time - 0.5) * first_contact, dim=1) * (
-            torch.norm(self._commands[:, :2], dim=1) > 0.1
+            torch.norm(self.robot.data.root_lin_vel_b[:, :2], dim=1) > 0.1
         )
 
         # undesired contacts (e.g. thighs)
@@ -474,7 +474,7 @@ class Go2PendulumEnv(DirectRLEnv):
             dim=1,
         )
         move_up = distance > self._terrain.cfg.terrain_generator.size[0] / 2
-        move_down = distance < torch.norm(self._commands[env_ids, :2], dim=1) * self.max_episode_length_s * 0.5
+        move_down = distance < torch.norm(self.robot.data.root_lin_vel_b[env_ids, :2], dim=1) * self.max_episode_length_s * 0.5
         move_down &= ~move_up
         self._terrain.update_env_origins(env_ids, move_up, move_down)
 
@@ -525,7 +525,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
-        self._update_commands()
         self._visualize_target_markers()
 
         # Logging
@@ -552,11 +551,6 @@ class Go2PendulumEnv(DirectRLEnv):
         # note: parent only deals with callbacks. not their visibility
         if debug_vis:
             # create markers if necessary for the first time
-            if not hasattr(self, "goal_vel_visualizer"):
-                # -- goal
-                self.goal_vel_visualizer = VisualizationMarkers(self.cfg.goal_vel_visualizer_cfg)
-                # -- current
-                self.current_vel_visualizer = VisualizationMarkers(self.cfg.current_vel_visualizer_cfg)
             if not hasattr(self, "target_visualizer"):
                 self.target_visualizer = VisualizationMarkers(self.cfg.target_marker_cfg)
             if (
@@ -568,16 +562,11 @@ class Go2PendulumEnv(DirectRLEnv):
                 height_scan_cfg.markers["hit"].radius = 0.01
                 self.height_scan_visualizer = VisualizationMarkers(height_scan_cfg)
             # set their visibility to true
-            self.goal_vel_visualizer.set_visibility(True)
-            self.current_vel_visualizer.set_visibility(True)
             if self.target_visualizer is not None:
                 self.target_visualizer.set_visibility(True)
             if self._height_scanner is not None and self.cfg.height_scan_debug_vis:
                 self.height_scan_visualizer.set_visibility(True)
         else:
-            if hasattr(self, "goal_vel_visualizer"):
-                self.goal_vel_visualizer.set_visibility(False)
-                self.current_vel_visualizer.set_visibility(False)
             if hasattr(self, "target_visualizer") and self.target_visualizer is not None:
                 self.target_visualizer.set_visibility(False)
             if hasattr(self, "height_scan_visualizer"):
@@ -589,36 +578,10 @@ class Go2PendulumEnv(DirectRLEnv):
         if not self.robot.is_initialized:
             return
         # get marker location
-        # -- base state
-        base_pos_w = self.robot.data.root_pos_w.clone()
-        # Place velocity arrows at the base frame height.
-        # -- resolve the scales and quaternions
-        vel_des_arrow_scale, vel_des_arrow_quat = self._resolve_xy_velocity_to_arrow(self._commands[:, :2])
-        vel_arrow_scale, vel_arrow_quat = self._resolve_xy_velocity_to_arrow(self.robot.data.root_lin_vel_b[:, :2])
-        # display markers
-        self.goal_vel_visualizer.visualize(base_pos_w, vel_des_arrow_quat, vel_des_arrow_scale)
-        self.current_vel_visualizer.visualize(base_pos_w, vel_arrow_quat, vel_arrow_scale)
         if self._height_scanner is not None and self.cfg.height_scan_debug_vis:
             ray_hits_w = self._height_scanner.data.ray_hits_w
             self.height_scan_visualizer.visualize(translations=ray_hits_w.reshape(-1, 3))
         self._visualize_target_markers()
-
-    def _resolve_xy_velocity_to_arrow(self, xy_velocity: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Converts the XY base velocity command to arrow direction rotation."""
-        # obtain default scale of the marker
-        default_scale = self.goal_vel_visualizer.cfg.markers["arrow"].scale
-        # arrow-scale
-        arrow_scale = torch.tensor(default_scale, device=self.device).repeat(xy_velocity.shape[0], 1)
-        arrow_scale[:, 0] *= torch.linalg.norm(xy_velocity, dim=1) * 3.0
-        # arrow-direction
-        heading_angle = torch.atan2(xy_velocity[:, 1], xy_velocity[:, 0])
-        zeros = torch.zeros_like(heading_angle)
-        arrow_quat = math_utils.quat_from_euler_xyz(zeros, zeros, heading_angle)
-        # convert everything back from base to world frame
-        base_quat_w = self.robot.data.root_quat_w
-        arrow_quat = math_utils.quat_mul(base_quat_w, arrow_quat)
-
-        return arrow_scale, arrow_quat
 
     def _visualize_target_markers(self) -> None:
         if self.target_state is None or self.target_visualizer is None:
@@ -670,39 +633,6 @@ class Go2PendulumEnv(DirectRLEnv):
         marker_indices = torch.hstack((arrow_indices, sphere_indices))
 
         self.target_visualizer.visualize(all_locations, all_orientations, marker_indices=marker_indices)
-
-    def _update_commands(self) -> None:
-        if self.target_state is None:
-            self._commands[:] = 0.0
-            return
-        env_origins = self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
-        base_pos_xy = self.robot.data.root_pos_w[:, :2] - env_origins[:, :2]
-        target_xy = self.target_state[:, :2]
-        delta_xy = target_xy - base_pos_xy
-        dist = torch.linalg.norm(delta_xy, dim=1, keepdim=True)
-        dist_safe = torch.clamp(dist, min=1e-6)
-        direction_unit = delta_xy / dist_safe
-
-        desired_speed = torch.full_like(dist, self.cfg.max_linear_speed)
-        close_to_goal = dist.squeeze(-1) <= self.cfg.position_tolerance
-        desired_speed[close_to_goal] = 0.3
-        desired_vel_world_xy = direction_unit * desired_speed
-
-        _, _, yaw = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)
-        desired_yaw = torch.atan2(delta_xy[:, 1], delta_xy[:, 0])
-        yaw_error = math_utils.wrap_to_pi(desired_yaw - yaw)
-        yaw_rate_cmd = torch.clamp(
-            yaw_error * self.cfg.yaw_kp,
-            -self.cfg.max_yaw_rate,
-            self.cfg.max_yaw_rate,
-        )
-
-        vel_world = torch.zeros(self.num_envs, 3, device=self.device)
-        vel_world[:, :2] = desired_vel_world_xy
-        vel_body = math_utils.quat_apply_yaw(math_utils.quat_conjugate(self.robot.data.root_quat_w), vel_world)
-
-        self._commands[:, :2] = vel_body[:, :2]
-        self._commands[:, 2] = yaw_rate_cmd
 
     @property
     def foot_positions_w(self) -> torch.Tensor:
@@ -803,8 +733,8 @@ class Go2PendulumEnv(DirectRLEnv):
         # raibert offsets
         phases = torch.abs(1.0 - (self.foot_indices * 2.0)) * 1.0 - 0.5
         frequencies = torch.tensor([3.0], device=self.device)
-        x_vel_des = self._commands[:, 0:1]
-        yaw_vel_des = self._commands[:, 2:3]
+        x_vel_des = self.robot.data.root_lin_vel_b[:, 0:1]
+        yaw_vel_des = self.robot.data.root_ang_vel_b[:, 2:3]
         y_vel_des = yaw_vel_des * desired_stance_length / 2
         desired_ys_offset = phases * y_vel_des * (0.5 / frequencies.unsqueeze(1))
         desired_ys_offset[:, 2:4] *= -1
