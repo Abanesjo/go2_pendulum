@@ -84,7 +84,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
-    use_pendulum = False
+    use_pendulum = True
     tracking_mode = False
 
     # gait shaping
@@ -111,6 +111,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     ang_vel_xy_reward_scale = -0.05
     pendulum_upright_reward_scale = 1.0
     pendulum_vel_reward_scale = 2.0
+    balanced_movement_reward_scale = 4.0
 
     # command generation
     yaw_kp = 1.0
