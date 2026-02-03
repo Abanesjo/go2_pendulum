@@ -187,7 +187,8 @@ class Go2PendulumEnv(DirectRLEnv):
         self.target_visualizer = VisualizationMarkers(self.cfg.target_marker_cfg)
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
-        self._actions = actions.clone()
+        # Bound actions to expected [-1, 1] range before scaling.
+        self._actions = torch.tanh(actions)
         self._processed_actions = self.cfg.action_scale * self._actions
 
         self.desired_joint_pos = self.robot.data.default_joint_pos.clone()
