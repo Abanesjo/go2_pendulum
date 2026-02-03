@@ -109,8 +109,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     lin_vel_z_reward_scale = -2.0
     dof_vel_reward_scale = -0.0001
     ang_vel_xy_reward_scale = -0.05
-    pendulum_upright_reward_scale = 0.1
-    pendulum_vel_reward_scale = 0.1
+    pendulum_upright_reward_scale = 1.0
+    pendulum_vel_reward_scale = 0.5
 
     # command generation
     yaw_kp = 1.0
