@@ -95,11 +95,6 @@ class Go2PendulumEnv(DirectRLEnv):
         # X/Y linear velocity and yaw angular velocity commands.
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
 
-        # PD Control params
-        self.Kp = torch.tensor([cfg.Kp] * self.cfg.action_space, device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
-        self.Kd = torch.tensor([cfg.Kd] * self.cfg.action_space, device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
-        self.torque_limits = cfg.torque_limits
-
         # Target state [x_d, y_d, yaw_d] in environment frame (randomized per reset).
         self.target_state = None
 
@@ -202,15 +197,11 @@ class Go2PendulumEnv(DirectRLEnv):
         self._update_commands()
 
     def _apply_action(self) -> None:
-        pos_error = self.desired_joint_pos[:, self._leg_dof_ids] - self.robot.data.joint_pos[:, self._leg_dof_ids]
-        vel_error = self.robot.data.joint_vel[:, self._leg_dof_ids]
-        torques = torch.zeros_like(self.robot.data.joint_pos)
-        torques[:, self._leg_dof_ids] = torch.clip(
-            self.Kp * pos_error - self.Kd * vel_error,
-            -self.torque_limits,
-            self.torque_limits,
+        # Send position targets; actuator model handles PD and torque limits.
+        self.robot.set_joint_position_target(
+            self.desired_joint_pos[:, self._leg_dof_ids],
+            joint_ids=self._leg_dof_ids,
         )
-        self.robot.set_joint_effort_target(torques)
 
     def _get_observations(self) -> dict:
         self._previous_actions = self._actions.clone()

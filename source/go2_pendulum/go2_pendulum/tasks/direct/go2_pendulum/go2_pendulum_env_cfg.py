@@ -6,7 +6,7 @@
 import math
 import os
 
-from isaaclab.actuators import ImplicitActuatorCfg, DCMotorCfg
+from isaaclab.actuators import DCMotorCfg
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg
@@ -84,18 +84,13 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
-    use_pendulum = False
+    use_pendulum = True
     tracking_mode = False
 
     # gait shaping
     raibert_heuristic_reward_scale = 0.0
     feet_clearance_reward_scale = 0.0
     tracking_contacts_shaped_force_reward_scale = 0.0
-
-    # PD control gains
-    Kp = 20.0
-    Kd = 0.5
-    torque_limits = 100.0
 
     # early stopping
     base_contact_grace_s = 0.0
@@ -218,13 +213,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        self.robot_cfg.actuators["base_legs"] = ImplicitActuatorCfg(
-            joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
-            effort_limit=23.5,
-            velocity_limit=30.0,
-            stiffness=0.0,
-            damping=0.0,
-        )
         if not self.use_pendulum:
             self.robot_cfg = self.robot_cfg.replace(
                 spawn=self.robot_cfg.spawn.replace(usd_path=GO2_USD_PATH),
