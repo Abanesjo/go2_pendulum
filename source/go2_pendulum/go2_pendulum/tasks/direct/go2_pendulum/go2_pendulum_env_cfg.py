@@ -83,8 +83,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
-    use_pendulum = True
-    rough_terrain = False
+    use_pendulum = False
+    rough_terrain = True
 
     # gait shaping
     raibert_heuristic_reward_scale = 0.0
@@ -93,24 +93,27 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # early stopping
     base_contact_grace_s = 0.0
-    termination_penalty = -100.0
     pendulum_contact_force_threshold = 1.0
 
-    # reward scales
-    position_reward_scale = 0.5
-    yaw_alignment_reward_scale = 0.5
-    action_rate_reward_scale = -0.01
-    feet_air_time_reward_scale = 0.01
-    undesired_contact_reward_scale = -1.0
-    dof_torques_reward_scale = -0.0002
-    dof_accel_reward_scale = -2.5e-7
-    orient_reward_scale = -1.0
-    lin_vel_z_reward_scale = -2.0
-    dof_vel_reward_scale = -0.0001
-    ang_vel_xy_reward_scale = -0.05
-    pendulum_upright_reward_scale = 1.0
-    pendulum_vel_reward_scale = 2.0
-    balanced_movement_reward_scale = 4.0
+    # termination conditions (omniwheel baseline)
+    position_tolerance = 0.5  # meters
+    max_displacement = 5.0  # meters
+    pendulum_failure_angle_deg = 8.0  # degrees
+    pendulum_failure_timeout_s = 4.0  # seconds
+    position_failure_timeout_s = 3.0  # seconds
+
+    # reward scales (omniwheel baseline)
+    rew_scale_alive = 1.0
+    rew_scale_terminated = -100.0
+    rew_scale_upright = 16.0
+    rew_scale_position = 8.0
+    rew_scale_yaw_alignment = 8.0
+    rew_scale_pendulum_velocity = 4.0
+    rew_scale_angular_velocity = 4.0
+    rew_scale_balanced_movement = 4.0
+    rew_scale_action_magnitude = -4.0
+    rew_scale_action_delta = -2.0
+    rew_scale_tilt = -10.0
 
     # goal generation
     goal_randomization_range = 3.0
@@ -205,8 +208,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
             self.robot_cfg = self.robot_cfg.replace(
                 spawn=self.robot_cfg.spawn.replace(usd_path=GO2_USD_PATH),
             )
-            self.pendulum_upright_reward_scale = 0.0
-            self.pendulum_vel_reward_scale = 0.0
+            self.rew_scale_upright = 0.0
+            self.rew_scale_pendulum_velocity = 0.0
+            self.rew_scale_balanced_movement = 0.0
             self.pendulum_contact_sensor = self.pendulum_contact_sensor.replace(
                 prim_path="/World/envs/env_.*/Robot/base"
             )
