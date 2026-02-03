@@ -190,9 +190,7 @@ class Go2PendulumEnv(DirectRLEnv):
         light_cfg.func("/World/Light", light_cfg)
 
         # create target visualizer after scene is set up
-        self.target_visualizer = None
-        if self.cfg.tracking_mode:
-            self.target_visualizer = VisualizationMarkers(self.cfg.target_marker_cfg)
+        self.target_visualizer = VisualizationMarkers(self.cfg.target_marker_cfg)
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self._actions = actions.clone()
@@ -498,20 +496,16 @@ class Go2PendulumEnv(DirectRLEnv):
         self.last_actions[env_ids] = 0
         self.gait_indices[env_ids] = 0
 
-        if self.cfg.tracking_mode:
-            # Sample new targets.
-            if self.target_state is None:
-                self.target_state = torch.zeros(self.num_envs, 3, device=self.device)
-            num_reset_envs = env_ids.shape[0]
-            goal_range = self.cfg.goal_randomization_range
-            goal_noise_x = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
-            goal_noise_y = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
-            self.target_state[env_ids, 0] = goal_noise_x
-            self.target_state[env_ids, 1] = goal_noise_y
-            self.target_state[env_ids, 2] = 0.0
-        else:
-            self.target_state = None
-            self._commands[env_ids] = torch.zeros_like(self._commands[env_ids]).uniform_(-1.0, 1.0)
+        # Sample new targets.
+        if self.target_state is None:
+            self.target_state = torch.zeros(self.num_envs, 3, device=self.device)
+        num_reset_envs = env_ids.shape[0]
+        goal_range = self.cfg.goal_randomization_range
+        goal_noise_x = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
+        goal_noise_y = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
+        self.target_state[env_ids, 0] = goal_noise_x
+        self.target_state[env_ids, 1] = goal_noise_y
+        self.target_state[env_ids, 2] = 0.0
 
         # Reset robot state.
         joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
@@ -531,9 +525,8 @@ class Go2PendulumEnv(DirectRLEnv):
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
-        if self.cfg.tracking_mode:
-            self._update_commands()
-            self._visualize_target_markers()
+        self._update_commands()
+        self._visualize_target_markers()
 
         # Logging
         extras = dict()
@@ -564,7 +557,7 @@ class Go2PendulumEnv(DirectRLEnv):
                 self.goal_vel_visualizer = VisualizationMarkers(self.cfg.goal_vel_visualizer_cfg)
                 # -- current
                 self.current_vel_visualizer = VisualizationMarkers(self.cfg.current_vel_visualizer_cfg)
-            if self.cfg.tracking_mode and not hasattr(self, "target_visualizer"):
+            if not hasattr(self, "target_visualizer"):
                 self.target_visualizer = VisualizationMarkers(self.cfg.target_marker_cfg)
             if (
                 self._height_scanner is not None
@@ -577,7 +570,7 @@ class Go2PendulumEnv(DirectRLEnv):
             # set their visibility to true
             self.goal_vel_visualizer.set_visibility(True)
             self.current_vel_visualizer.set_visibility(True)
-            if self.cfg.tracking_mode and self.target_visualizer is not None:
+            if self.target_visualizer is not None:
                 self.target_visualizer.set_visibility(True)
             if self._height_scanner is not None and self.cfg.height_scan_debug_vis:
                 self.height_scan_visualizer.set_visibility(True)
@@ -628,7 +621,7 @@ class Go2PendulumEnv(DirectRLEnv):
         return arrow_scale, arrow_quat
 
     def _visualize_target_markers(self) -> None:
-        if not self.cfg.tracking_mode or self.target_state is None or self.target_visualizer is None:
+        if self.target_state is None or self.target_visualizer is None:
             return
         if self._marker_locations is None:
             self._marker_up = self._marker_up.to(device=self.device)
@@ -679,8 +672,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self.target_visualizer.visualize(all_locations, all_orientations, marker_indices=marker_indices)
 
     def _update_commands(self) -> None:
-        if not self.cfg.tracking_mode:
-            return
         if self.target_state is None:
             self._commands[:] = 0.0
             return
