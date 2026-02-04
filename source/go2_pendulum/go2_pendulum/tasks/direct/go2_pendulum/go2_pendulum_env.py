@@ -113,21 +113,33 @@ class Go2PendulumEnv(DirectRLEnv):
                 "pendulum_upright",
                 "pendulum_velocity",
                 "balanced_movement",
-                "rew_action_rate",
+                "action_rate_penalty",
                 "raibert_heuristic",
-                "orient",
-                "lin_vel_z",
-                "dof_vel",
-                "ang_vel_xy",
-                "feet_clearance",
-                "tracking_contacts_shaped_force",
+                "orient_penalty",
+                "lin_vel_z_penalty",
+                "dof_vel_penalty",
+                "ang_vel_xy_penalty",
+                "feet_clearance_penalty",
+                "tracking_contacts_shaped_force_penalty",
                 "feet_air_time",
-                "undesired_contacts",
+                "undesired_contacts_penalty",
                 "termination_penalty",
-                "dof_torques_l2",
-                "dof_acc_l2",
-                "torque_sat_frac",
+                "dof_torques_l2_penalty",
+                "dof_acc_l2_penalty",
             ]
+        }
+        self._penalty_keys = {
+            "action_rate_penalty",
+            "orient_penalty",
+            "lin_vel_z_penalty",
+            "dof_vel_penalty",
+            "ang_vel_xy_penalty",
+            "feet_clearance_penalty",
+            "tracking_contacts_shaped_force_penalty",
+            "undesired_contacts_penalty",
+            "termination_penalty",
+            "dof_torques_l2_penalty",
+            "dof_acc_l2_penalty",
         }
 
         # Effort limit for saturation logging (used by DC motor model).
@@ -139,6 +151,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
         # Track termination causes for accurate logging.
         self._base_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self._pendulum_angle_failure_steps = None
 
         self.last_actions = torch.zeros(
             self.num_envs,
@@ -295,7 +308,7 @@ class Go2PendulumEnv(DirectRLEnv):
         )
 
         # penalize vertical velocity (z-component of base linear velocity)
-        rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[:, 2])
+        rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_w[:, 2])
 
         # penalize high joint velocities
         rew_dof_vel = torch.sum(
@@ -376,14 +389,6 @@ class Go2PendulumEnv(DirectRLEnv):
         # joint torques and accelerations
         rew_dof_torques_l2 = torch.sum(torch.square(self.robot.data.applied_torque[:, self._leg_dof_ids]), dim=1)
         rew_dof_acc_l2 = torch.sum(torch.square(self.robot.data.joint_acc[:, self._leg_dof_ids]), dim=1)
-        if torch.isfinite(self._leg_effort_limit):
-            torque_sat_frac = torch.mean(
-                (torch.abs(self.robot.data.applied_torque[:, self._leg_dof_ids]) >= 0.95 * self._leg_effort_limit)
-                .float(),
-                dim=1,
-            )
-        else:
-            torque_sat_frac = torch.zeros(self.num_envs, device=self.device)
 
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale,
@@ -391,22 +396,21 @@ class Go2PendulumEnv(DirectRLEnv):
             "pendulum_upright": pendulum_upright_reward * self.cfg.pendulum_upright_reward_scale,
             "pendulum_velocity": pendulum_velocity_reward * self.cfg.pendulum_vel_reward_scale,
             "balanced_movement": balanced_movement_reward * balanced_movement_scale,
-            "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
+            "action_rate_penalty": rew_action_rate * self.cfg.action_rate_penalty_scale,
             "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale,
-            "orient": rew_orient * self.cfg.orient_reward_scale,
-            "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
-            "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,
-            "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,
-            "feet_clearance": rew_feet_clearance * self.cfg.feet_clearance_reward_scale,
-            "tracking_contacts_shaped_force": (
-                rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale
+            "orient_penalty": rew_orient * self.cfg.orient_penalty_scale,
+            "lin_vel_z_penalty": rew_lin_vel_z * self.cfg.lin_vel_z_penalty_scale,
+            "dof_vel_penalty": rew_dof_vel * self.cfg.dof_vel_penalty_scale,
+            "ang_vel_xy_penalty": rew_ang_vel_xy * self.cfg.ang_vel_xy_penalty_scale,
+            "feet_clearance_penalty": rew_feet_clearance * self.cfg.feet_clearance_penalty_scale,
+            "tracking_contacts_shaped_force_penalty": (
+                rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_penalty_scale
             ),
             "feet_air_time": rew_feet_air_time * self.cfg.feet_air_time_reward_scale,
-            "undesired_contacts": rew_undesired_contacts * self.cfg.undesired_contact_reward_scale,
+            "undesired_contacts_penalty": rew_undesired_contacts * self.cfg.undesired_contact_penalty_scale,
             "termination_penalty": rew_termination_penalty,
-            "dof_torques_l2": rew_dof_torques_l2 * self.cfg.dof_torques_reward_scale,
-            "dof_acc_l2": rew_dof_acc_l2 * self.cfg.dof_accel_reward_scale,
-            "torque_sat_frac": torque_sat_frac,
+            "dof_torques_l2_penalty": rew_dof_torques_l2 * self.cfg.dof_torques_penalty_scale,
+            "dof_acc_l2_penalty": rew_dof_acc_l2 * self.cfg.dof_accel_penalty_scale,
         }
 
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
@@ -435,6 +439,22 @@ class Go2PendulumEnv(DirectRLEnv):
                 dim=1,
             )
             terminated = terminated | pendulum_contact
+        if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
+            pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
+            pendulum_angle_norm = torch.linalg.norm(pendulum_joint_pos, dim=1)
+            if self._pendulum_angle_failure_steps is None:
+                self._pendulum_angle_failure_steps = torch.zeros(
+                    self.num_envs, device=self.device, dtype=torch.long
+                )
+            pendulum_failing = pendulum_angle_norm > self.cfg.pendulum_terminate_angle_rad
+            self._pendulum_angle_failure_steps = torch.where(
+                pendulum_failing,
+                self._pendulum_angle_failure_steps + 1,
+                torch.zeros_like(self._pendulum_angle_failure_steps),
+            )
+            failure_steps_threshold = max(1, math.ceil(self.cfg.pendulum_terminate_duration_s / self.step_dt))
+            pendulum_angle_terminated = self._pendulum_angle_failure_steps >= failure_steps_threshold
+            terminated = terminated | pendulum_angle_terminated
         return terminated, time_out
 
     def _update_terrain_curriculum(self, env_ids: torch.Tensor) -> None:
@@ -468,6 +488,8 @@ class Go2PendulumEnv(DirectRLEnv):
         # Reset variables.
         self.last_actions[env_ids] = 0
         self.gait_indices[env_ids] = 0
+        if self._pendulum_angle_failure_steps is not None:
+            self._pendulum_angle_failure_steps[env_ids] = 0
 
         if self.cfg.tracking_mode:
             # Sample new targets.
@@ -516,7 +538,8 @@ class Go2PendulumEnv(DirectRLEnv):
         extras = dict()
         for key in self._episode_sums.keys():
             episodic_sum_avg = torch.mean(self._episode_sums[key][env_ids])
-            extras["Episode_Reward/" + key] = episodic_sum_avg / self.max_episode_length_s
+            prefix = "Episode_Penalty/" if key in self._penalty_keys else "Episode_Reward/"
+            extras[prefix + key] = episodic_sum_avg / self.max_episode_length_s
             self._episode_sums[key][env_ids] = 0.0
         self.extras["log"] = dict()
         self.extras["log"].update(extras)

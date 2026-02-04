@@ -84,32 +84,32 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
-    use_pendulum = True
-    tracking_mode = True
-    rough_terrain = False
+    use_pendulum = False
+    tracking_mode = False
+    rough_terrain = True
 
     # gait shaping
     raibert_heuristic_reward_scale = 0.0
-    feet_clearance_reward_scale = 0.0
-    tracking_contacts_shaped_force_reward_scale = 0.0
+    feet_clearance_penalty_scale = 0.0
+    tracking_contacts_shaped_force_penalty_scale = 0.0
 
     # early stopping
     base_contact_grace_s = 0.0
-    termination_penalty = -100.0
+    termination_penalty = -1000.0
     pendulum_contact_force_threshold = 1.0
 
     # reward scales
-    lin_vel_reward_scale = 1.5
-    yaw_rate_reward_scale = 0.75
-    action_rate_reward_scale = -0.01
+    lin_vel_reward_scale = 0.5
+    yaw_rate_reward_scale = 0.25
+    action_rate_penalty_scale = -0.01
     feet_air_time_reward_scale = 0.01
-    undesired_contact_reward_scale = -1.0
-    dof_torques_reward_scale = -0.0002
-    dof_accel_reward_scale = -2.5e-7
-    orient_reward_scale = -1.0
-    lin_vel_z_reward_scale = -2.0
-    dof_vel_reward_scale = -0.0001
-    ang_vel_xy_reward_scale = -0.05
+    undesired_contact_penalty_scale = -1.0
+    dof_torques_penalty_scale = -0.0002
+    dof_accel_penalty_scale = -2.5e-7
+    orient_penalty_scale = -1.0
+    lin_vel_z_penalty_scale = -0.1
+    dof_vel_penalty_scale = -0.0001
+    ang_vel_xy_penalty_scale = -0.05
     pendulum_upright_reward_scale = 1.0
     pendulum_vel_reward_scale = 2.0
     balanced_movement_reward_scale = 4.0
@@ -127,6 +127,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_angle_min = -9.0 * math.pi / 180.0
     pendulum_angle_max = 9.0 * math.pi / 180.0
     pendulum_terminate_angle_rad = 60.0 * math.pi / 180.0
+    pendulum_terminate_duration_s = 1.0
 
     # terrain scaling
     terrain_scale = 0.5
@@ -147,7 +148,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
         prim_path="/World/ground",
         terrain_type="generator",
         terrain_generator=ROUGH_TERRAINS_CFG,
-        max_init_terrain_level=5,
+        max_init_terrain_level=0,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
