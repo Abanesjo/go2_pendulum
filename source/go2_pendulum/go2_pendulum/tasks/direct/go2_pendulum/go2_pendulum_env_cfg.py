@@ -6,7 +6,7 @@
 import math
 import os
 
-from isaaclab.actuators import DCMotorCfg
+from isaaclab.actuators import DCMotorCfg, ImplicitActuatorCfg
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg
@@ -64,6 +64,10 @@ GO2_PENDULUM_CFG = ArticulationCfg(
             damping=0.5,
             friction=0.0,
         ),
+        # Keep pendulum joints passive with light damping (matches omniwheel defaults).
+        "pendulum_acts": ImplicitActuatorCfg(
+            joint_names_expr=["^pendulum_joint[12]$"], damping=0.0001, stiffness=None
+        ),
     },
 )
 
@@ -86,20 +90,32 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     use_pendulum = False
     rough_terrain = True
 
+    # observation noise (uniform in [-scale, scale])
+    state_position_noise = 0.01  # meters
+    state_orientation_noise = 2.0 * math.pi / 180.0  # radians
+    pendulum_position_noise = 1.0 * math.pi / 180.0  # radians
+    pendulum_velocity_noise = 1.0 * math.pi / 180.0  # radians/sec
+
+    # curriculum (independent of terrain curriculum)
+    curriculum_enabled = True
+    curriculum_levels = 5
+    curriculum_steps_per_level = 250_000
+
     # early stopping
     base_contact_grace_s = 0.0
     pendulum_contact_force_threshold = 1.0
+    tilt_terminate_angle_deg = 60.0
 
     # termination conditions
     position_tolerance = 0.5  # meters
-    max_displacement = 3.0  # meters
+    max_displacement = 2.0  # meters
     pendulum_failure_angle_deg = 8.0  # degrees
     pendulum_failure_timeout_s = 5.0  # seconds
     position_failure_timeout_s = 10.0  # seconds
 
     # reward scales
     rew_scale_alive = 1.0
-    rew_scale_terminated = -10000.0
+    rew_scale_terminated = -1000.0
     rew_scale_upright = 16.0
     rew_scale_position = 8.0
     rew_scale_yaw_alignment = 4.0
@@ -107,6 +123,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     rew_scale_angular_velocity = 0.1
     rew_scale_balanced_movement = 4.0
     rew_scale_tilt = -2.0
+    rew_scale_action_delta = -0.1
     # quadruped-specific reward terms (aligned with Unitree Go2 rough locomotion defaults)
     rew_scale_feet_air_time = 0.01
     rew_scale_dof_torques = -0.0002
@@ -121,13 +138,14 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # goal generation
     goal_randomization_range = 3.0
+    goal_randomization_range_min = 0.0
     #goal_randomization_angle = math.pi
     position_tolerance = 0.01
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
-    pendulum_angle_min = -9.0 * math.pi / 180.0
-    pendulum_angle_max = 9.0 * math.pi / 180.0
+    pendulum_angle_min = 0.0 * math.pi / 180.0
+    pendulum_angle_max = 8.0 * math.pi / 180.0
     pendulum_terminate_angle_rad = 60.0 * math.pi / 180.0
 
     # terrain scaling
@@ -212,6 +230,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
             self.robot_cfg = self.robot_cfg.replace(
                 spawn=self.robot_cfg.spawn.replace(usd_path=GO2_USD_PATH),
             )
+            actuators = dict(self.robot_cfg.actuators)
+            actuators.pop("pendulum_acts", None)
+            self.robot_cfg = self.robot_cfg.replace(actuators=actuators)
             self.rew_scale_upright = 0.0
             self.rew_scale_pendulum_velocity = 0.0
             self.rew_scale_balanced_movement = 0.0

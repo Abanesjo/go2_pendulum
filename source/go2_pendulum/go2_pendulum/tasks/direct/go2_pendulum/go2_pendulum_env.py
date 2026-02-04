@@ -87,6 +87,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
         # Joint position command (deviation from default joint positions).
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
+        self._prev_actions = torch.zeros_like(self._actions)
 
         # Target state [x_d, y_d, yaw_d] in environment frame (randomized per reset).
         self.target_state = None
@@ -115,6 +116,7 @@ class Go2PendulumEnv(DirectRLEnv):
                 "dof_acc_l2",
                 "undesired_contacts",
                 "tilt",
+                "action_delta",
                 "alive",
                 "terminated",
             ]
@@ -178,6 +180,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         # Bound actions to expected [-1, 1] range before scaling.
+        self._prev_actions.copy_(self._actions)
         self._actions = torch.tanh(actions)
         self._processed_actions = self.cfg.action_scale * self._actions
 
@@ -215,8 +218,43 @@ class Go2PendulumEnv(DirectRLEnv):
             )
             pendulum_joint_vel = torch.zeros_like(pendulum_joint_pos)
 
-        position_error_b_xy, yaw_error = self._compute_body_frame_errors()
+        pendulum_joint_pos_raw = pendulum_joint_pos
+        pendulum_joint_vel_raw = pendulum_joint_vel
+        if self.cfg.use_pendulum:
+            if self.cfg.pendulum_position_noise > 0.0:
+                pendulum_joint_pos = pendulum_joint_pos + sample_uniform(
+                    -self.cfg.pendulum_position_noise,
+                    self.cfg.pendulum_position_noise,
+                    pendulum_joint_pos.shape,
+                    pendulum_joint_pos.device,
+                )
+            if self.cfg.pendulum_velocity_noise > 0.0:
+                pendulum_joint_vel = pendulum_joint_vel + sample_uniform(
+                    -self.cfg.pendulum_velocity_noise,
+                    self.cfg.pendulum_velocity_noise,
+                    pendulum_joint_vel.shape,
+                    pendulum_joint_vel.device,
+                )
+
+        position_error_b_xy_raw, yaw_error_raw = self._compute_body_frame_errors()
+        position_error_b_xy = position_error_b_xy_raw
+        yaw_error = yaw_error_raw
+        if self.cfg.state_position_noise > 0.0:
+            position_error_b_xy = position_error_b_xy + sample_uniform(
+                -self.cfg.state_position_noise,
+                self.cfg.state_position_noise,
+                position_error_b_xy.shape,
+                position_error_b_xy.device,
+            )
+        if self.cfg.state_orientation_noise > 0.0:
+            yaw_error = yaw_error + sample_uniform(
+                -self.cfg.state_orientation_noise,
+                self.cfg.state_orientation_noise,
+                yaw_error.shape,
+                yaw_error.device,
+            )
         state_error = torch.cat([position_error_b_xy, yaw_error.unsqueeze(-1)], dim=-1)
+        state_error_raw = torch.cat([position_error_b_xy_raw, yaw_error_raw.unsqueeze(-1)], dim=-1)
 
         net_contact_forces = self._contact_sensor.data.net_forces_w_history
         foot_contacts = (
@@ -250,11 +288,11 @@ class Go2PendulumEnv(DirectRLEnv):
                     self.robot.data.root_lin_vel_b,
                     self.robot.data.root_ang_vel_b,
                     self.robot.data.projected_gravity_b,
-                    state_error,
+                    state_error_raw,
                     leg_joint_pos,
                     leg_joint_vel,
-                    pendulum_joint_pos,
-                    pendulum_joint_vel,
+                    pendulum_joint_pos_raw,
+                    pendulum_joint_vel_raw,
                     foot_contacts,
                     height_data,
                     self._actions,
@@ -328,6 +366,9 @@ class Go2PendulumEnv(DirectRLEnv):
         base_speed = torch.linalg.norm(base_lin_vel, dim=1)
         balanced_movement_reward = torch.exp(-pendulum_norm * base_speed)
 
+        # action delta penalty (smoothness)
+        action_delta = torch.sum(torch.square(self._actions - self._prev_actions), dim=1)
+
         # quadruped-specific terms
         joint_torques = torch.nan_to_num(
             self.robot.data.applied_torque[:, self._leg_dof_ids], nan=0.0, posinf=0.0, neginf=0.0
@@ -365,6 +406,7 @@ class Go2PendulumEnv(DirectRLEnv):
             "pendulum_velocity": self.cfg.rew_scale_pendulum_velocity * pendulum_velocity_reward,
             "angular_velocity": self.cfg.rew_scale_angular_velocity * angular_velocity_reward,
             "balanced_movement": self.cfg.rew_scale_balanced_movement * balanced_movement_reward,
+            "action_delta": self.cfg.rew_scale_action_delta * action_delta,
             "feet_air_time": self.cfg.rew_scale_feet_air_time * feet_air_time_reward,
             "dof_torques_l2": self.cfg.rew_scale_dof_torques * joint_torques,
             "dof_acc_l2": self.cfg.rew_scale_dof_acc * joint_accel,
@@ -432,11 +474,18 @@ class Go2PendulumEnv(DirectRLEnv):
             failure_threshold = max(1, int(self.cfg.position_failure_timeout_s / self.step_dt))
             position_tolerance_terminated = self.position_failure_steps >= failure_threshold
 
+        # Tilt termination.
+        roll, pitch, _ = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)
+        tilt_cos = torch.cos(roll) * torch.cos(pitch)
+        tilt_angle = torch.acos(torch.clamp(tilt_cos, -1.0, 1.0))
+        tilt_terminated = tilt_angle > (self.cfg.tilt_terminate_angle_deg * math.pi / 180.0)
+
         terminated = (
             cstr_termination_contacts
             | pendulum_terminated
             | position_terminated
             | position_tolerance_terminated
+            | tilt_terminated
         )
 
         if self.cfg.use_pendulum and self._pendulum_contact_sensor is not None:
@@ -463,6 +512,18 @@ class Go2PendulumEnv(DirectRLEnv):
         move_down &= ~move_up
         self._terrain.update_env_origins(env_ids, move_up, move_down)
 
+    def _get_curriculum_scale(self) -> float:
+        """Returns a [0, 1] curriculum scale based on global step count."""
+        if not self.cfg.curriculum_enabled:
+            return 1.0
+        levels = max(1, int(self.cfg.curriculum_levels))
+        if levels == 1:
+            return 1.0
+        steps_per_level = max(1, int(self.cfg.curriculum_steps_per_level))
+        step_count = int(self.common_step_counter)
+        level = min(levels - 1, step_count // steps_per_level)
+        return level / (levels - 1)
+
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self.robot._ALL_INDICES
@@ -475,6 +536,7 @@ class Go2PendulumEnv(DirectRLEnv):
             # Spread out the resets to avoid spikes in training when many environments reset at a similar time.
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
         self._actions[env_ids] = 0.0
+        self._prev_actions[env_ids] = 0.0
 
         # Reset variables.
         self.gait_indices[env_ids] = 0
@@ -483,7 +545,10 @@ class Go2PendulumEnv(DirectRLEnv):
         if self.target_state is None:
             self.target_state = torch.zeros(self.num_envs, 3, device=self.device)
         num_reset_envs = env_ids.shape[0]
-        goal_range = self.cfg.goal_randomization_range
+        curriculum_scale = self._get_curriculum_scale()
+        goal_range = self.cfg.goal_randomization_range_min + (
+            self.cfg.goal_randomization_range - self.cfg.goal_randomization_range_min
+        ) * curriculum_scale
         goal_noise_x = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
         goal_noise_y = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
         self.target_state[env_ids, 0] = goal_noise_x
@@ -494,13 +559,17 @@ class Go2PendulumEnv(DirectRLEnv):
         joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
         joint_vel = self.robot.data.default_joint_vel[env_ids].clone()
 
+        pendulum_angle_min = self.cfg.pendulum_angle_min * curriculum_scale
+        pendulum_angle_max = self.cfg.pendulum_angle_max * curriculum_scale
         for joint_idx in self._pendulum_dof_ids:
-            joint_pos[:, joint_idx] += sample_uniform(
-                self.cfg.pendulum_angle_min,
-                self.cfg.pendulum_angle_max,
+            signs = torch.randint(0, 2, joint_pos[:, joint_idx].shape, device=joint_pos.device) * 2 - 1
+            magnitudes = sample_uniform(
+                pendulum_angle_min,
+                pendulum_angle_max,
                 joint_pos[:, joint_idx].shape,
                 joint_pos.device,
             )
+            joint_pos[:, joint_idx] += signs.float() * magnitudes
 
         default_root_state = self.robot.data.default_root_state[env_ids]
         default_root_state[:, :3] += self._terrain.env_origins[env_ids]
