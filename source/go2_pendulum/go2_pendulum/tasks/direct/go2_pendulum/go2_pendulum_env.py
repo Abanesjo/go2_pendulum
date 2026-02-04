@@ -104,7 +104,7 @@ class Go2PendulumEnv(DirectRLEnv):
         else:
             self._pendulum_dof_ids = torch.tensor([], device=self.device, dtype=torch.long)
 
-        # Joint position command (deviation from default joint positions).
+        # Joint position command (normalized actions mapped to absolute joint targets).
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
         self._prev_actions = torch.zeros_like(self._actions)
 
@@ -221,7 +221,7 @@ class Go2PendulumEnv(DirectRLEnv):
             height_data = (
                 self._height_scanner.data.pos_w[:, 2].unsqueeze(1) - self._height_scanner.data.ray_hits_w[..., 2] - 0.5
             ).clip(-1.0, 1.0)
-        leg_joint_pos = self.robot.data.joint_pos[:, self._leg_dof_ids] - self.robot.data.default_joint_pos[:, self._leg_dof_ids]
+        leg_joint_pos = (self.robot.data.joint_pos[:, self._leg_dof_ids] - self._joint_offset) / self._action_scale
         leg_joint_vel = self.robot.data.joint_vel[:, self._leg_dof_ids]
         if self.cfg.use_pendulum:
             pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
