@@ -105,42 +105,40 @@ class Go2PendulumEnv(DirectRLEnv):
         self._marker_up = torch.tensor([0.0, 0.0, 1.0])
 
         # Logging
-        self._episode_sums = {
-            key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
-            for key in [
-                "track_lin_vel_xy_exp",
-                "track_ang_vel_z_exp",
-                "pendulum_upright",
-                "pendulum_velocity",
-                "balanced_movement",
-                "action_rate_penalty",
-                "raibert_heuristic",
-                "orient_penalty",
-                "lin_vel_z_penalty",
-                "dof_vel_penalty",
-                "ang_vel_xy_penalty",
-                "feet_clearance_penalty",
-                "tracking_contacts_shaped_force_penalty",
-                "feet_air_time",
-                "undesired_contacts_penalty",
-                "termination_penalty",
-                "dof_torques_l2_penalty",
-                "dof_acc_l2_penalty",
-            ]
-        }
-        self._penalty_keys = {
+        reward_keys = [
+            "track_lin_vel_xy_exp",
+            "track_ang_vel_z_exp",
+            "pendulum_upright",
+            "pendulum_velocity",
+            "balanced_movement",
+        ]
+        if self.cfg.raibert_heuristic_reward_scale != 0.0:
+            reward_keys.append("raibert_heuristic")
+        reward_keys.append("feet_air_time")
+        penalty_keys = [
             "action_rate_penalty",
             "orient_penalty",
             "lin_vel_z_penalty",
             "dof_vel_penalty",
             "ang_vel_xy_penalty",
-            "feet_clearance_penalty",
-            "tracking_contacts_shaped_force_penalty",
-            "undesired_contacts_penalty",
-            "termination_penalty",
-            "dof_torques_l2_penalty",
-            "dof_acc_l2_penalty",
+        ]
+        if self.cfg.feet_clearance_penalty_scale != 0.0:
+            penalty_keys.append("feet_clearance_penalty")
+        if self.cfg.tracking_contacts_shaped_force_penalty_scale != 0.0:
+            penalty_keys.append("tracking_contacts_shaped_force_penalty")
+        penalty_keys.extend(
+            [
+                "undesired_contacts_penalty",
+                "termination_penalty",
+                "dof_torques_l2_penalty",
+                "dof_acc_l2_penalty",
+            ]
+        )
+        episode_sum_keys = reward_keys + penalty_keys
+        self._episode_sums = {
+            key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device) for key in episode_sum_keys
         }
+        self._penalty_keys = set(penalty_keys)
 
         # Effort limit for saturation logging (used by DC motor model).
         base_legs_actuator = self.cfg.robot_cfg.actuators.get("base_legs")
@@ -416,7 +414,8 @@ class Go2PendulumEnv(DirectRLEnv):
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging
         for key, value in rewards.items():
-            self._episode_sums[key] += value
+            if key in self._episode_sums:
+                self._episode_sums[key] += value
         return reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
