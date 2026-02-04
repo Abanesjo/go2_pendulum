@@ -439,7 +439,8 @@ class Go2PendulumEnv(DirectRLEnv):
         env_origins = self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
 
         # Pendulum balance termination.
-        if self.cfg.use_pendulum:
+        curriculum_level = self._get_curriculum_level()
+        if self.cfg.use_pendulum and curriculum_level >= self.cfg.pendulum_termination_start_level:
             pendulum_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
             pendulum_norm = torch.linalg.norm(pendulum_pos, dim=-1)
             if self.pendulum_failure_steps is None:
@@ -454,6 +455,8 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminated = self.pendulum_failure_steps >= failure_threshold
         else:
             pendulum_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+            if self.pendulum_failure_steps is not None:
+                self.pendulum_failure_steps.zero_()
 
         # Position deviation termination.
         position_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -523,6 +526,14 @@ class Go2PendulumEnv(DirectRLEnv):
         step_count = int(self.common_step_counter)
         level = min(levels - 1, step_count // steps_per_level)
         return level / (levels - 1)
+
+    def _get_curriculum_level(self) -> int:
+        if not self.cfg.curriculum_enabled:
+            return int(self.cfg.curriculum_levels) - 1
+        levels = max(1, int(self.cfg.curriculum_levels))
+        steps_per_level = max(1, int(self.cfg.curriculum_steps_per_level))
+        step_count = int(self.common_step_counter)
+        return min(levels - 1, step_count // steps_per_level)
 
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None or len(env_ids) == self.num_envs:

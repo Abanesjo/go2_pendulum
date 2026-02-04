@@ -105,6 +105,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     base_contact_grace_s = 0.0
     pendulum_contact_force_threshold = 1.0
     tilt_terminate_angle_deg = 60.0
+    pendulum_termination_start_level = 1
 
     # termination conditions
     position_tolerance = 0.5  # meters
@@ -115,7 +116,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # reward scales
     rew_scale_alive = 1.0
-    rew_scale_terminated = -1000.0
+    rew_scale_terminated = -500.0
     rew_scale_upright = 16.0
     rew_scale_position = 8.0
     rew_scale_yaw_alignment = 4.0
