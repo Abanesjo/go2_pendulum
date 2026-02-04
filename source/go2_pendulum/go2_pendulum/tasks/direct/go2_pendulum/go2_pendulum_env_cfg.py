@@ -99,13 +99,13 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_contact_force_threshold = 1.0
 
     # reward scales
-    lin_vel_reward_scale = 0.5
-    yaw_rate_reward_scale = 0.25
+    lin_vel_reward_scale = 0.8
+    yaw_rate_reward_scale = 0.4
     action_rate_penalty_scale = -0.01
     feet_air_time_reward_scale = 1.0
     undesired_contact_penalty_scale = -10.0
     dof_torques_penalty_scale = -0.0002
-    dof_accel_penalty_scale = -2.5e-7
+    dof_accel_penalty_scale = -1.25e-7
     orient_penalty_scale = -10.0
     lin_vel_z_penalty_scale = -0.2
     lin_vel_z_penalty_clip = 10.0
