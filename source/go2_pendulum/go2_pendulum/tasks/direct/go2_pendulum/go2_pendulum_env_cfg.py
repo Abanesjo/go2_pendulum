@@ -116,10 +116,10 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     balanced_movement_reward_scale = 4.0
 
     # command generation
-    yaw_kp = 10.0
-    max_yaw_rate = 1.0
+    yaw_kp = 1.0
+    max_yaw_rate = 0.5
     max_linear_speed = 0.7
-    goal_randomization_range = 3.0
+    goal_randomization_range = 0.1
     goal_randomization_angle = math.pi
     position_tolerance = 0.8
 
