@@ -150,6 +150,7 @@ class Go2PendulumEnv(DirectRLEnv):
         # Track termination causes for accurate logging.
         self._base_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._pendulum_angle_failure_steps = None
+        self._position_failure_steps = None
 
         self.last_actions = torch.zeros(
             self.num_envs,
@@ -456,6 +457,21 @@ class Go2PendulumEnv(DirectRLEnv):
             failure_steps_threshold = max(1, math.ceil(self.cfg.pendulum_terminate_duration_s / self.step_dt))
             pendulum_angle_terminated = self._pendulum_angle_failure_steps >= failure_steps_threshold
             terminated = terminated | pendulum_angle_terminated
+        if self.cfg.tracking_mode and self.target_state is not None:
+            env_origins = self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
+            base_pos_xy = self.robot.data.root_pos_w[:, :2] - env_origins[:, :2]
+            position_error = torch.linalg.norm(self.target_state[:, :2] - base_pos_xy, dim=1)
+            if self._position_failure_steps is None:
+                self._position_failure_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+            position_failing = position_error > self.cfg.position_tolerance
+            self._position_failure_steps = torch.where(
+                position_failing,
+                self._position_failure_steps + 1,
+                torch.zeros_like(self._position_failure_steps),
+            )
+            position_failure_threshold = max(1, math.ceil(self.cfg.position_terminate_duration_s / self.step_dt))
+            position_terminated = self._position_failure_steps >= position_failure_threshold
+            terminated = terminated | position_terminated
         return terminated, time_out
 
     def _update_terrain_curriculum(self, env_ids: torch.Tensor) -> None:
@@ -491,6 +507,8 @@ class Go2PendulumEnv(DirectRLEnv):
         self.gait_indices[env_ids] = 0
         if self._pendulum_angle_failure_steps is not None:
             self._pendulum_angle_failure_steps[env_ids] = 0
+        if self._position_failure_steps is not None:
+            self._position_failure_steps[env_ids] = 0
 
         if self.cfg.tracking_mode:
             # Sample new targets.
@@ -518,12 +536,14 @@ class Go2PendulumEnv(DirectRLEnv):
         joint_vel = self.robot.data.default_joint_vel[env_ids].clone()
 
         for joint_idx in self._pendulum_dof_ids:
-            joint_pos[:, joint_idx] += sample_uniform(
+            signs = torch.randint(0, 2, joint_pos[:, joint_idx].shape, device=joint_pos.device) * 2 - 1
+            magnitudes = sample_uniform(
                 self.cfg.pendulum_angle_min,
                 self.cfg.pendulum_angle_max,
                 joint_pos[:, joint_idx].shape,
                 joint_pos.device,
             )
+            joint_pos[:, joint_idx] += signs.float() * magnitudes
 
         default_root_state = self.robot.data.default_root_state[env_ids]
         default_root_state[:, :3] += self._terrain.env_origins[env_ids]
@@ -687,7 +707,7 @@ class Go2PendulumEnv(DirectRLEnv):
         desired_speed = torch.full_like(dist, self.cfg.max_linear_speed)
         close_to_goal = dist.squeeze(-1) <= self.cfg.position_tolerance
         if torch.any(close_to_goal):
-            close_dist = dist[close_to_goal].squeeze(-1)
+            close_dist = dist[close_to_goal]
             close_ratio = torch.clamp(close_dist / self.cfg.position_tolerance, 0.0, 1.0)
             desired_speed[close_to_goal] = self.cfg.max_linear_speed * (
                 torch.expm1(close_ratio) / math.expm1(1.0)
