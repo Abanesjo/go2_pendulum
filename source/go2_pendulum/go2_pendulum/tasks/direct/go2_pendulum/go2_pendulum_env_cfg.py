@@ -78,8 +78,51 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     decimation = 4
     episode_length_s = 20.0
     # - spaces definition
-    action_scale = 0.25
-    action_space = 12
+    # Action mapping (per leg joint) derived from URDF joint limits.
+    # Order matches leg_joint_names.
+    leg_joint_names = [
+        "FL_hip_joint",
+        "FL_thigh_joint",
+        "FL_calf_joint",
+        "FR_hip_joint",
+        "FR_thigh_joint",
+        "FR_calf_joint",
+        "RL_hip_joint",
+        "RL_thigh_joint",
+        "RL_calf_joint",
+        "RR_hip_joint",
+        "RR_thigh_joint",
+        "RR_calf_joint",
+    ]
+    action_scale = [
+        1.0472,
+        2.53075,
+        0.94247,
+        1.0472,
+        2.53075,
+        0.94247,
+        1.0472,
+        2.53075,
+        0.94247,
+        1.0472,
+        2.53075,
+        0.94247,
+    ]
+    joint_offset = [
+        0.0,
+        0.95995,
+        -1.78023,
+        0.0,
+        0.95995,
+        -1.78023,
+        0.0,
+        2.00715,
+        -1.78023,
+        0.0,
+        2.00715,
+        -1.78023,
+    ]
+    action_space = len(leg_joint_names)
     observation_space = 243
     state_space = 0
     debug_vis = True
@@ -88,7 +131,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     height_scan_debug_vis = False
     return_teacher_obs = False
     use_pendulum = True
-    rough_terrain = False
+    rough_terrain = True
 
     # observation noise (uniform in [-scale, scale])
     state_position_noise = 0.01  # meters
@@ -108,7 +151,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_termination_start_level = 1
 
     # termination conditions
-    position_tolerance = 0.5  # meters
+    position_tolerance = 0.8  # meters
     max_displacement = 5.0  # meters
     pendulum_failure_angle_deg = 8.0  # degrees
     pendulum_failure_timeout_s = 5.0  # seconds
@@ -139,7 +182,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # goal generation
     goal_randomization_range = 3.0
-    goal_randomization_range_min = 0.0
+    goal_randomization_range_min = 0.5
     goal_randomization_angle = math.pi
     position_tolerance = 0.01
 

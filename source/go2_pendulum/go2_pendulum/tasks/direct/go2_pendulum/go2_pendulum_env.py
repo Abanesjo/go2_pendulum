@@ -63,15 +63,34 @@ class Go2PendulumEnv(DirectRLEnv):
 
         # Resolve leg and pendulum joints.
         leg_joint_ids = []
-        for idx, name in enumerate(self.robot.joint_names):
-            if name.endswith("_hip_joint") or name.endswith("_thigh_joint") or name.endswith("_calf_joint"):
-                leg_joint_ids.append(idx)
+        if hasattr(self.cfg, "leg_joint_names") and self.cfg.leg_joint_names:
+            for joint_name in self.cfg.leg_joint_names:
+                joint_idx, _ = self.robot.find_joints(joint_name)
+                if len(joint_idx) != 1:
+                    raise RuntimeError(f"Expected exactly one joint for '{joint_name}', got {joint_idx}.")
+                leg_joint_ids.append(joint_idx[0])
+        else:
+            for idx, name in enumerate(self.robot.joint_names):
+                if name.endswith("_hip_joint") or name.endswith("_thigh_joint") or name.endswith("_calf_joint"):
+                    leg_joint_ids.append(idx)
         if len(leg_joint_ids) != self.cfg.action_space:
             raise RuntimeError(
                 "Leg joint count does not match action space: "
                 f"{len(leg_joint_ids)} vs {self.cfg.action_space}."
             )
         self._leg_dof_ids = torch.tensor(leg_joint_ids, device=self.device, dtype=torch.long)
+        action_scale = torch.tensor(self.cfg.action_scale, device=self.device, dtype=torch.float32)
+        joint_offset = torch.tensor(self.cfg.joint_offset, device=self.device, dtype=torch.float32)
+        if action_scale.numel() != self.cfg.action_space:
+            raise RuntimeError(
+                f"Action scale length {action_scale.numel()} does not match action space {self.cfg.action_space}."
+            )
+        if joint_offset.numel() != self.cfg.action_space:
+            raise RuntimeError(
+                f"Joint offset length {joint_offset.numel()} does not match action space {self.cfg.action_space}."
+            )
+        self._action_scale = action_scale.unsqueeze(0)
+        self._joint_offset = joint_offset.unsqueeze(0)
 
         self._pendulum_dof_count = len(self.cfg.pendulum_joint_names)
         if self.cfg.use_pendulum:
@@ -182,12 +201,10 @@ class Go2PendulumEnv(DirectRLEnv):
         # Bound actions to expected [-1, 1] range before scaling.
         self._prev_actions.copy_(self._actions)
         self._actions = torch.tanh(actions)
-        self._processed_actions = self.cfg.action_scale * self._actions
+        self._processed_actions = self._actions * self._action_scale
 
         self.desired_joint_pos = self.robot.data.default_joint_pos.clone()
-        self.desired_joint_pos[:, self._leg_dof_ids] = (
-            self.robot.data.default_joint_pos[:, self._leg_dof_ids] + self._processed_actions
-        )
+        self.desired_joint_pos[:, self._leg_dof_ids] = self._processed_actions + self._joint_offset
 
         # No velocity command generation in position tracking mode.
 
