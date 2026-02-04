@@ -107,7 +107,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     dof_torques_penalty_scale = -0.0002
     dof_accel_penalty_scale = -2.5e-7
     orient_penalty_scale = -1.0
-    lin_vel_z_penalty_scale = -0.1
+    lin_vel_z_penalty_scale = -0.02
+    lin_vel_z_penalty_clip = 10.0
     dof_vel_penalty_scale = -0.0001
     ang_vel_xy_penalty_scale = -0.05
     pendulum_upright_reward_scale = 1.0

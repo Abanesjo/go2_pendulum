@@ -306,7 +306,9 @@ class Go2PendulumEnv(DirectRLEnv):
         )
 
         # penalize vertical velocity (z-component of base linear velocity)
-        rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_w[:, 2])
+        lin_vel_z = torch.nan_to_num(self.robot.data.root_lin_vel_w[:, 2], nan=0.0, posinf=0.0, neginf=0.0)
+        lin_vel_z = torch.clamp(lin_vel_z, -self.cfg.lin_vel_z_penalty_clip, self.cfg.lin_vel_z_penalty_clip)
+        rew_lin_vel_z = lin_vel_z * lin_vel_z
 
         # penalize high joint velocities
         rew_dof_vel = torch.sum(
