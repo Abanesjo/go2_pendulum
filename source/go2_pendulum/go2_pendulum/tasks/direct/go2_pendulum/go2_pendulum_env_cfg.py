@@ -117,16 +117,16 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # reward scales
     rew_scale_alive = 1.0
     rew_scale_terminated = -500.0
-    rew_scale_upright = 16.0
-    rew_scale_position = 8.0
+    rew_scale_upright = 1.6
+    rew_scale_position = 5.0
     rew_scale_yaw_alignment = 4.0
-    rew_scale_pendulum_velocity = 4.0
+    rew_scale_pendulum_velocity = 5.0
     rew_scale_angular_velocity = 0.1
-    rew_scale_balanced_movement = 4.0
+    rew_scale_balanced_movement = 2.0
     rew_scale_tilt = -2.0
     rew_scale_action_delta = -0.1
     # quadruped-specific reward terms (aligned with Unitree Go2 rough locomotion defaults)
-    rew_scale_feet_air_time = 0.01
+    rew_scale_feet_air_time = 1.0
     rew_scale_dof_torques = -0.0002
     rew_scale_dof_acc = -2.5e-7
     rew_scale_undesired_contacts = -1.0
