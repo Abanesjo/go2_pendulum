@@ -130,6 +130,7 @@ class Go2PendulumEnv(DirectRLEnv):
                 "pendulum_velocity",
                 "angular_velocity",
                 "balanced_movement",
+                "joint_pos_init",
                 "feet_air_time",
                 "dof_torques_l2",
                 "dof_acc_l2",
@@ -384,6 +385,8 @@ class Go2PendulumEnv(DirectRLEnv):
         action_delta = torch.sum(torch.square(self._actions - self._prev_actions), dim=1)
 
         # quadruped-specific terms
+        joint_pos_error = self.robot.data.joint_pos[:, self._leg_dof_ids] - self.robot.data.default_joint_pos[:, self._leg_dof_ids]
+        joint_pos_error = torch.sum(torch.square(joint_pos_error), dim=1)
         joint_torques = torch.nan_to_num(
             self.robot.data.applied_torque[:, self._leg_dof_ids], nan=0.0, posinf=0.0, neginf=0.0
         )
@@ -421,6 +424,7 @@ class Go2PendulumEnv(DirectRLEnv):
             "angular_velocity": self.cfg.rew_scale_angular_velocity * angular_velocity_reward,
             "balanced_movement": self.cfg.rew_scale_balanced_movement * balanced_movement_reward,
             "action_delta": self.cfg.rew_scale_action_delta * action_delta,
+            "joint_pos_init": self.cfg.rew_scale_joint_pos_init * joint_pos_error,
             "feet_air_time": self.cfg.rew_scale_feet_air_time * feet_air_time_reward,
             "dof_torques_l2": self.cfg.rew_scale_dof_torques * joint_torques,
             "dof_acc_l2": self.cfg.rew_scale_dof_acc * joint_accel,

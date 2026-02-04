@@ -168,6 +168,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     rew_scale_balanced_movement = 2.0
     rew_scale_tilt = -2.0
     rew_scale_action_delta = -0.1
+    rew_scale_joint_pos_init = -1.0
     # quadruped-specific reward terms (aligned with Unitree Go2 rough locomotion defaults)
     rew_scale_feet_air_time = 1.0
     rew_scale_dof_torques = -0.0002
