@@ -686,7 +686,12 @@ class Go2PendulumEnv(DirectRLEnv):
 
         desired_speed = torch.full_like(dist, self.cfg.max_linear_speed)
         close_to_goal = dist.squeeze(-1) <= self.cfg.position_tolerance
-        desired_speed[close_to_goal] = 0.3
+        if torch.any(close_to_goal):
+            close_dist = dist[close_to_goal].squeeze(-1)
+            close_ratio = torch.clamp(close_dist / self.cfg.position_tolerance, 0.0, 1.0)
+            desired_speed[close_to_goal] = self.cfg.max_linear_speed * (
+                torch.expm1(close_ratio) / math.expm1(1.0)
+            )
         desired_vel_world_xy = direction_unit * desired_speed
 
         _, _, yaw = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)
