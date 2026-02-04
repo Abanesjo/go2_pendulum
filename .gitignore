@@ -71,5 +71,3 @@ tests/
 .isaac-lab-docker-history
 
 *.pyc
-
-references/

@@ -28,7 +28,6 @@ class Go2PendulumEnv(DirectRLEnv):
     def __init__(self, cfg: Go2PendulumEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
-        # gait shaping
         self._feet_ids = []
         foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
 
@@ -88,9 +87,6 @@ class Go2PendulumEnv(DirectRLEnv):
 
         # Joint position command (deviation from default joint positions).
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
-        self._previous_actions = torch.zeros(
-            self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device
-        )
 
         # Target state [x_d, y_d, yaw_d] in environment frame (randomized per reset).
         self.target_state = None
@@ -114,8 +110,10 @@ class Go2PendulumEnv(DirectRLEnv):
                 "pendulum_velocity",
                 "angular_velocity",
                 "balanced_movement",
-                "action_magnitude",
-                "action_delta",
+                "feet_air_time",
+                "dof_torques_l2",
+                "dof_acc_l2",
+                "undesired_contacts",
                 "tilt",
                 "alive",
                 "terminated",
@@ -132,14 +130,6 @@ class Go2PendulumEnv(DirectRLEnv):
         # Track termination causes for accurate logging.
         self._base_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
 
-        self.last_actions = torch.zeros(
-            self.num_envs,
-            gym.spaces.flatdim(self.single_action_space),
-            3,
-            dtype=torch.float,
-            device=self.device,
-            requires_grad=False,
-        )
 
         # Get specific body indices.
         self._base_id, _ = self._contact_sensor.find_bodies("base")
@@ -206,7 +196,6 @@ class Go2PendulumEnv(DirectRLEnv):
         )
 
     def _get_observations(self) -> dict:
-        self._previous_actions = self._actions.clone()
         height_data = None
         if self._height_scanner is not None:
             height_data = (
@@ -229,6 +218,12 @@ class Go2PendulumEnv(DirectRLEnv):
         position_error_b_xy, yaw_error = self._compute_body_frame_errors()
         state_error = torch.cat([position_error_b_xy, yaw_error.unsqueeze(-1)], dim=-1)
 
+        net_contact_forces = self._contact_sensor.data.net_forces_w_history
+        foot_contacts = (
+            torch.max(torch.norm(net_contact_forces[:, :, self._feet_ids_sensor], dim=-1), dim=1)[0]
+            > self.cfg.foot_contact_force_threshold
+        ).float()
+
         policy_tensors = [
             self.robot.data.root_lin_vel_b,
             self.robot.data.root_ang_vel_b,
@@ -238,6 +233,7 @@ class Go2PendulumEnv(DirectRLEnv):
             leg_joint_vel,
             pendulum_joint_pos,
             pendulum_joint_vel,
+            foot_contacts,
         ]
         if self.cfg.use_height_scan:
             if height_data is None:
@@ -259,6 +255,7 @@ class Go2PendulumEnv(DirectRLEnv):
                     leg_joint_vel,
                     pendulum_joint_pos,
                     pendulum_joint_vel,
+                    foot_contacts,
                     height_data,
                     self._actions,
                 ],
@@ -331,9 +328,30 @@ class Go2PendulumEnv(DirectRLEnv):
         base_speed = torch.linalg.norm(base_lin_vel, dim=1)
         balanced_movement_reward = torch.exp(-pendulum_norm * base_speed)
 
-        # action penalties
-        action_magnitude_reward = torch.sum(self._actions**2, dim=1)
-        action_delta_reward = torch.sum((self._actions - self.last_actions[:, :, 0]) ** 2, dim=1)
+        # quadruped-specific terms
+        joint_torques = torch.nan_to_num(
+            self.robot.data.applied_torque[:, self._leg_dof_ids], nan=0.0, posinf=0.0, neginf=0.0
+        )
+        joint_torques = torch.sum(torch.square(joint_torques), dim=1)
+        joint_accel = torch.nan_to_num(
+            self.robot.data.joint_acc[:, self._leg_dof_ids], nan=0.0, posinf=0.0, neginf=0.0
+        )
+        joint_accel = torch.sum(torch.square(joint_accel), dim=1)
+
+        first_contact = self._contact_sensor.compute_first_contact(self.step_dt)[:, self._feet_ids_sensor]
+        last_air_time = self._contact_sensor.data.last_air_time[:, self._feet_ids_sensor]
+        air_time = torch.sum((last_air_time - self.cfg.feet_air_time_threshold_s) * first_contact, dim=1)
+        feet_air_time_reward = air_time * (base_speed > self.cfg.feet_air_time_speed_threshold)
+
+        if self._undesired_contact_body_ids is not None:
+            net_contact_forces = self._contact_sensor.data.net_forces_w_history
+            is_contact = (
+                torch.max(torch.norm(net_contact_forces[:, :, self._undesired_contact_body_ids], dim=-1), dim=1)[0]
+                > self.cfg.undesired_contact_force_threshold
+            )
+            undesired_contacts = torch.sum(is_contact, dim=1)
+        else:
+            undesired_contacts = torch.zeros(self.num_envs, device=self.device)
 
         # body tilt penalty
         roll, pitch, _ = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)
@@ -347,8 +365,10 @@ class Go2PendulumEnv(DirectRLEnv):
             "pendulum_velocity": self.cfg.rew_scale_pendulum_velocity * pendulum_velocity_reward,
             "angular_velocity": self.cfg.rew_scale_angular_velocity * angular_velocity_reward,
             "balanced_movement": self.cfg.rew_scale_balanced_movement * balanced_movement_reward,
-            "action_magnitude": self.cfg.rew_scale_action_magnitude * action_magnitude_reward,
-            "action_delta": self.cfg.rew_scale_action_delta * action_delta_reward,
+            "feet_air_time": self.cfg.rew_scale_feet_air_time * feet_air_time_reward,
+            "dof_torques_l2": self.cfg.rew_scale_dof_torques * joint_torques,
+            "dof_acc_l2": self.cfg.rew_scale_dof_acc * joint_accel,
+            "undesired_contacts": self.cfg.rew_scale_undesired_contacts * undesired_contacts,
             "tilt": self.cfg.rew_scale_tilt * tilt_angle,
             "alive": self.cfg.rew_scale_alive * (1.0 - self.reset_terminated.float()),
             "terminated": self.cfg.rew_scale_terminated * self.reset_terminated.float(),
@@ -358,9 +378,6 @@ class Go2PendulumEnv(DirectRLEnv):
         # Logging
         for key, value in rewards.items():
             self._episode_sums[key] += value
-
-        self.last_actions = torch.roll(self.last_actions, 1, 2)
-        self.last_actions[:, :, 0] = self._actions[:]
 
         return reward
 
@@ -458,10 +475,8 @@ class Go2PendulumEnv(DirectRLEnv):
             # Spread out the resets to avoid spikes in training when many environments reset at a similar time.
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
         self._actions[env_ids] = 0.0
-        self._previous_actions[env_ids] = 0.0
 
         # Reset variables.
-        self.last_actions[env_ids] = 0
         self.gait_indices[env_ids] = 0
 
         # Sample new targets.
@@ -610,120 +625,3 @@ class Go2PendulumEnv(DirectRLEnv):
         marker_indices = torch.hstack((arrow_indices, sphere_indices))
 
         self.target_visualizer.visualize(all_locations, all_orientations, marker_indices=marker_indices)
-
-    @property
-    def foot_positions_w(self) -> torch.Tensor:
-        return self.robot.data.body_pos_w[:, self._feet_ids]
-
-    def _step_contact_targets(self):
-        frequencies = 3.0
-        phases = 0.5
-        offsets = 0.0
-        bounds = 0.0
-        durations = 0.5 * torch.ones((self.num_envs,), dtype=torch.float32, device=self.device)
-        self.gait_indices = torch.remainder(self.gait_indices + self.step_dt * frequencies, 1.0)
-
-        foot_indices = [
-            self.gait_indices + phases + offsets + bounds,
-            self.gait_indices + offsets,
-            self.gait_indices + bounds,
-            self.gait_indices + phases,
-        ]
-
-        self.foot_indices = torch.remainder(torch.cat([foot_indices[i].unsqueeze(1) for i in range(4)], dim=1), 1.0)
-
-        for idxs in foot_indices:
-            stance_idxs = torch.remainder(idxs, 1) < durations
-            swing_idxs = torch.remainder(idxs, 1) > durations
-
-            idxs[stance_idxs] = torch.remainder(idxs[stance_idxs], 1) * (0.5 / durations[stance_idxs])
-            idxs[swing_idxs] = 0.5 + (torch.remainder(idxs[swing_idxs], 1) - durations[swing_idxs]) * (
-                0.5 / (1 - durations[swing_idxs])
-            )
-
-        self.clock_inputs[:, 0] = torch.sin(2 * torch.pi * foot_indices[0])
-        self.clock_inputs[:, 1] = torch.sin(2 * torch.pi * foot_indices[1])
-        self.clock_inputs[:, 2] = torch.sin(2 * torch.pi * foot_indices[2])
-        self.clock_inputs[:, 3] = torch.sin(2 * torch.pi * foot_indices[3])
-
-        # von mises distribution
-        kappa = 0.07
-        smoothing_cdf_start = torch.distributions.normal.Normal(0, kappa).cdf
-
-        smoothing_multiplier_FL = smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0)) * (
-            1 - smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 0.5)
-        ) + smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 1) * (
-            1 - smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 0.5 - 1)
-        )
-        smoothing_multiplier_FR = smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0)) * (
-            1 - smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 0.5)
-        ) + smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 1) * (
-            1 - smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 0.5 - 1)
-        )
-        smoothing_multiplier_RL = smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0)) * (
-            1 - smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 0.5)
-        ) + smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 1) * (
-            1 - smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 0.5 - 1)
-        )
-        smoothing_multiplier_RR = smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0)) * (
-            1 - smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 0.5)
-        ) + smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 1) * (
-            1 - smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 0.5 - 1)
-        )
-
-        self.desired_contact_states[:, 0] = smoothing_multiplier_FL
-        self.desired_contact_states[:, 1] = smoothing_multiplier_FR
-        self.desired_contact_states[:, 2] = smoothing_multiplier_RL
-        self.desired_contact_states[:, 3] = smoothing_multiplier_RR
-
-    def _reward_raibert_heuristic(self):
-        cur_footsteps_translated = self.foot_positions_w - self.robot.data.root_pos_w.unsqueeze(1)
-        footsteps_in_body_frame = torch.zeros(self.num_envs, 4, 3, device=self.device)
-        for i in range(4):
-            footsteps_in_body_frame[:, i, :] = math_utils.quat_apply_yaw(
-                math_utils.quat_conjugate(self.robot.data.root_quat_w), cur_footsteps_translated[:, i, :]
-            )
-
-        # nominal positions: [FR, FL, RR, RL]
-        desired_stance_width = 0.25
-        desired_ys_nom = torch.tensor(
-            [
-                desired_stance_width / 2,
-                -desired_stance_width / 2,
-                desired_stance_width / 2,
-                -desired_stance_width / 2,
-            ],
-            device=self.device,
-        ).unsqueeze(0)
-
-        desired_stance_length = 0.45
-        desired_xs_nom = torch.tensor(
-            [
-                desired_stance_length / 2,
-                desired_stance_length / 2,
-                -desired_stance_length / 2,
-                -desired_stance_length / 2,
-            ],
-            device=self.device,
-        ).unsqueeze(0)
-
-        # raibert offsets
-        phases = torch.abs(1.0 - (self.foot_indices * 2.0)) * 1.0 - 0.5
-        frequencies = torch.tensor([3.0], device=self.device)
-        x_vel_des = self.robot.data.root_lin_vel_b[:, 0:1]
-        yaw_vel_des = self.robot.data.root_ang_vel_b[:, 2:3]
-        y_vel_des = yaw_vel_des * desired_stance_length / 2
-        desired_ys_offset = phases * y_vel_des * (0.5 / frequencies.unsqueeze(1))
-        desired_ys_offset[:, 2:4] *= -1
-        desired_xs_offset = phases * x_vel_des * (0.5 / frequencies.unsqueeze(1))
-
-        desired_ys_nom = desired_ys_nom + desired_ys_offset
-        desired_xs_nom = desired_xs_nom + desired_xs_offset
-
-        desired_footsteps_body_frame = torch.cat((desired_xs_nom.unsqueeze(2), desired_ys_nom.unsqueeze(2)), dim=2)
-
-        err_raibert_heuristic = torch.abs(desired_footsteps_body_frame - footsteps_in_body_frame[:, :, 0:2])
-
-        reward = torch.sum(torch.square(err_raibert_heuristic), dim=(1, 2))
-
-        return reward

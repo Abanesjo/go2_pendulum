@@ -76,7 +76,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # - spaces definition
     action_scale = 0.25
     action_space = 12
-    observation_space = 241
+    observation_space = 243
     state_space = 0
     debug_vis = True
     use_height_scan = True
@@ -86,38 +86,42 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     use_pendulum = False
     rough_terrain = True
 
-    # gait shaping
-    raibert_heuristic_reward_scale = 0.0
-    feet_clearance_reward_scale = 0.0
-    tracking_contacts_shaped_force_reward_scale = 0.0
-
     # early stopping
     base_contact_grace_s = 0.0
     pendulum_contact_force_threshold = 1.0
 
-    # termination conditions (omniwheel baseline)
+    # termination conditions
     position_tolerance = 0.5  # meters
-    max_displacement = 5.0  # meters
+    max_displacement = 3.0  # meters
     pendulum_failure_angle_deg = 8.0  # degrees
-    pendulum_failure_timeout_s = 4.0  # seconds
-    position_failure_timeout_s = 3.0  # seconds
+    pendulum_failure_timeout_s = 5.0  # seconds
+    position_failure_timeout_s = 10.0  # seconds
 
-    # reward scales (omniwheel baseline)
+    # reward scales
     rew_scale_alive = 1.0
-    rew_scale_terminated = -100.0
+    rew_scale_terminated = -10000.0
     rew_scale_upright = 16.0
     rew_scale_position = 8.0
-    rew_scale_yaw_alignment = 8.0
+    rew_scale_yaw_alignment = 4.0
     rew_scale_pendulum_velocity = 4.0
-    rew_scale_angular_velocity = 4.0
+    rew_scale_angular_velocity = 0.1
     rew_scale_balanced_movement = 4.0
-    rew_scale_action_magnitude = -4.0
-    rew_scale_action_delta = -2.0
-    rew_scale_tilt = -10.0
+    rew_scale_tilt = -2.0
+    # quadruped-specific reward terms (aligned with Unitree Go2 rough locomotion defaults)
+    rew_scale_feet_air_time = 0.01
+    rew_scale_dof_torques = -0.0002
+    rew_scale_dof_acc = -2.5e-7
+    rew_scale_undesired_contacts = -1.0
+
+    # contact/air-time thresholds
+    feet_air_time_threshold_s = 0.5
+    feet_air_time_speed_threshold = 0.1
+    foot_contact_force_threshold = 1.0
+    undesired_contact_force_threshold = 1.0
 
     # goal generation
     goal_randomization_range = 3.0
-    goal_randomization_angle = math.pi
+    #goal_randomization_angle = math.pi
     position_tolerance = 0.01
 
     # pendulum setup
@@ -145,7 +149,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
         prim_path="/World/ground",
         terrain_type="generator",
         terrain_generator=ROUGH_TERRAINS_CFG,
-        max_init_terrain_level=5,
+        max_init_terrain_level=0,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
