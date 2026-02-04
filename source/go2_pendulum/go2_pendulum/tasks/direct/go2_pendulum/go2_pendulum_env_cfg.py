@@ -87,7 +87,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
-    use_pendulum = False
+    use_pendulum = True
     rough_terrain = True
 
     # observation noise (uniform in [-scale, scale])
