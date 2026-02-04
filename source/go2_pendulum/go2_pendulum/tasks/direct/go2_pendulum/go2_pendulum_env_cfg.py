@@ -109,7 +109,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # termination conditions
     position_tolerance = 0.5  # meters
-    max_displacement = 2.0  # meters
+    max_displacement = 5.0  # meters
     pendulum_failure_angle_deg = 8.0  # degrees
     pendulum_failure_timeout_s = 5.0  # seconds
     position_failure_timeout_s = 10.0  # seconds
@@ -140,7 +140,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # goal generation
     goal_randomization_range = 3.0
     goal_randomization_range_min = 0.0
-    #goal_randomization_angle = math.pi
+    goal_randomization_angle = math.pi
     position_tolerance = 0.01
 
     # pendulum setup

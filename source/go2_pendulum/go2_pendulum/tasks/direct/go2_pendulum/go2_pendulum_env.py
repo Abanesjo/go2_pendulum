@@ -310,8 +310,10 @@ class Go2PendulumEnv(DirectRLEnv):
 
         if self.target_state is not None:
             target_xy = self.target_state[:, :2]
+            target_yaw = self.target_state[:, 2]
         else:
             target_xy = torch.zeros((self.num_envs, 2), device=self.device)
+            target_yaw = torch.zeros(self.num_envs, device=self.device)
 
         position_error_xy = target_xy - base_pos_xy
         position_error_w = root_pos.new_zeros((self.num_envs, 3))
@@ -319,13 +321,8 @@ class Go2PendulumEnv(DirectRLEnv):
         position_error_b = math_utils.quat_apply_inverse(root_quat, position_error_w)
         position_error_b_xy = position_error_b[:, :2]
 
-        direction_norm = torch.linalg.norm(position_error_xy, dim=-1, keepdim=True)
-        direction_norm = torch.clamp(direction_norm, min=1e-6)
-        direction_unit = position_error_xy / direction_norm
-        target_heading_w = root_pos.new_zeros((self.num_envs, 3))
-        target_heading_w[:, :2] = direction_unit
-        target_heading_b = math_utils.quat_apply_inverse(root_quat, target_heading_w)
-        yaw_error = torch.atan2(target_heading_b[:, 1], target_heading_b[:, 0])
+        _, _, yaw = math_utils.euler_xyz_from_quat(root_quat)
+        yaw_error = math_utils.wrap_to_pi(target_yaw - yaw)
 
         return position_error_b_xy, yaw_error
 
@@ -562,9 +559,15 @@ class Go2PendulumEnv(DirectRLEnv):
         ) * curriculum_scale
         goal_noise_x = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
         goal_noise_y = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
+        goal_yaw = sample_uniform(
+            -self.cfg.goal_randomization_angle,
+            self.cfg.goal_randomization_angle,
+            (num_reset_envs,),
+            self.device,
+        )
         self.target_state[env_ids, 0] = goal_noise_x
         self.target_state[env_ids, 1] = goal_noise_y
-        self.target_state[env_ids, 2] = 0.0
+        self.target_state[env_ids, 2] = goal_yaw
 
         # Reset robot state.
         joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
