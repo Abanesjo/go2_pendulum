@@ -88,7 +88,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     height_scan_debug_vis = False
     return_teacher_obs = False
     use_pendulum = True
-    rough_terrain = True
+    rough_terrain = False
 
     # observation noise (uniform in [-scale, scale])
     state_position_noise = 0.01  # meters
@@ -121,7 +121,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     rew_scale_position = 5.0
     rew_scale_yaw_alignment = 4.0
     rew_scale_pendulum_velocity = 5.0
-    rew_scale_angular_velocity = 0.1
+    rew_scale_angular_velocity = 5.0
     rew_scale_balanced_movement = 2.0
     rew_scale_tilt = -2.0
     rew_scale_action_delta = -0.1
