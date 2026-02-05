@@ -76,7 +76,7 @@ GO2_PENDULUM_CFG = ArticulationCfg(
 class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # env
     decimation = 4
-    episode_length_s = 20.0
+    episode_length_s = 10.0
     # - spaces definition
     # Action mapping (per leg joint) derived from URDF joint limits.
     # Order matches leg_joint_names.
@@ -131,7 +131,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     height_scan_debug_vis = False
     return_teacher_obs = False
     use_pendulum = False
-    rough_terrain = False
+    rough_terrain = True
 
     # observation noise (uniform in [-scale, scale])
     state_position_noise = 0.01  # meters
@@ -151,35 +151,35 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_termination_start_level = 1
 
     # termination conditions
-    terminate_on_base_contact = False
+    terminate_on_base_contact = True
     terminate_on_pendulum_failure = False
-    terminate_on_position_max = False
-    terminate_on_position_timeout = False
+    terminate_on_position_max = True
+    terminate_on_position_timeout = True
     terminate_on_tilt = True
     terminate_on_pendulum_contact = True
     position_tolerance = 0.8  # meters
     max_displacement = 5.0  # meters
     pendulum_failure_angle_deg = 8.0  # degrees
-    pendulum_failure_timeout_s = 5.0  # seconds
-    position_failure_timeout_s = 10.0  # seconds
+    pendulum_failure_timeout_s = 3.0  # seconds
+    position_failure_timeout_s = 8.0  # seconds
 
     # reward scales
     rew_scale_alive = 0
     rew_scale_terminated = -5000.0
     rew_scale_upright = 0 #1.6
-    rew_scale_position = 0 #5.0
-    rew_scale_yaw_alignment = 0 #4.0
+    rew_scale_position = 8.0
+    rew_scale_yaw_alignment = 2.0
     rew_scale_pendulum_velocity = 0 #5.0
     rew_scale_angular_velocity = 0 #5.0
     rew_scale_balanced_movement = 0 #2.0
-    rew_scale_tilt = -8.0
-    rew_scale_action_delta = -0.1
-    rew_scale_joint_pos_init = -20.0
+    rew_scale_tilt = -5.0
+    rew_scale_action_delta = 0.0
+    rew_scale_joint_pos_init = -4.0
     # quadruped-specific reward terms (aligned with Unitree Go2 rough locomotion defaults)
-    rew_scale_feet_air_time = 0 #1.0
+    rew_scale_feet_air_time = 15.0
     rew_scale_dof_torques = -0.0002
-    rew_scale_dof_acc = -2.5e-7
-    rew_scale_undesired_contacts = -1.0
+    rew_scale_dof_acc = -1.25e-7
+    rew_scale_undesired_contacts = -20.0
 
     # contact/air-time thresholds
     feet_air_time_threshold_s = 0.5
