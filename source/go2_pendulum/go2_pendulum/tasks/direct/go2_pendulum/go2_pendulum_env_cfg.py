@@ -157,7 +157,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     terminate_on_position_timeout = True
     terminate_on_tilt = True
     terminate_on_pendulum_contact = True
-    position_tolerance = 0.8  # meters
+    position_tolerance = 0.1  # meters
     max_displacement = 5.0  # meters
     pendulum_failure_angle_deg = 8.0  # degrees
     pendulum_failure_timeout_s = 3.0  # seconds
