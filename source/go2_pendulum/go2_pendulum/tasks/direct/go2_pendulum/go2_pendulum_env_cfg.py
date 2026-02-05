@@ -154,7 +154,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     terminate_on_base_contact = True
     terminate_on_pendulum_failure = False
     terminate_on_position_max = True
-    terminate_on_position_timeout = True
+    terminate_on_position_timeout = False
     terminate_on_tilt = True
     terminate_on_pendulum_contact = True
     position_tolerance = 0.1  # meters
@@ -167,8 +167,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     rew_scale_alive = 0
     rew_scale_terminated = -5000.0
     rew_scale_upright = 0 #1.6
-    rew_scale_position = 12.0
-    rew_scale_yaw_alignment = 2.0
+    rew_scale_position = 16.0
+    rew_scale_yaw_alignment = 4.0
     rew_scale_pendulum_velocity = 0 #5.0
     rew_scale_angular_velocity = 0 #5.0
     rew_scale_balanced_movement = 0 #2.0
