@@ -130,8 +130,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
-    use_pendulum = True
-    rough_terrain = True
+    use_pendulum = False
+    rough_terrain = False
 
     # observation noise (uniform in [-scale, scale])
     state_position_noise = 0.01  # meters
@@ -140,17 +140,23 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_velocity_noise = 1.0 * math.pi / 180.0  # radians/sec
 
     # curriculum (independent of terrain curriculum)
-    curriculum_enabled = True
+    curriculum_enabled = False
     curriculum_levels = 5
     curriculum_steps_per_level = 250_000
 
     # early stopping
     base_contact_grace_s = 0.0
     pendulum_contact_force_threshold = 1.0
-    tilt_terminate_angle_deg = 60.0
+    tilt_terminate_angle_deg = 90.0
     pendulum_termination_start_level = 1
 
     # termination conditions
+    terminate_on_base_contact = False
+    terminate_on_pendulum_failure = False
+    terminate_on_position_max = False
+    terminate_on_position_timeout = False
+    terminate_on_tilt = True
+    terminate_on_pendulum_contact = True
     position_tolerance = 0.8  # meters
     max_displacement = 5.0  # meters
     pendulum_failure_angle_deg = 8.0  # degrees
@@ -158,19 +164,19 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     position_failure_timeout_s = 10.0  # seconds
 
     # reward scales
-    rew_scale_alive = 1.0
-    rew_scale_terminated = -500.0
-    rew_scale_upright = 1.6
-    rew_scale_position = 5.0
-    rew_scale_yaw_alignment = 4.0
-    rew_scale_pendulum_velocity = 5.0
-    rew_scale_angular_velocity = 5.0
-    rew_scale_balanced_movement = 2.0
-    rew_scale_tilt = -2.0
+    rew_scale_alive = 0
+    rew_scale_terminated = -5000.0
+    rew_scale_upright = 0 #1.6
+    rew_scale_position = 0 #5.0
+    rew_scale_yaw_alignment = 0 #4.0
+    rew_scale_pendulum_velocity = 0 #5.0
+    rew_scale_angular_velocity = 0 #5.0
+    rew_scale_balanced_movement = 0 #2.0
+    rew_scale_tilt = -8.0
     rew_scale_action_delta = -0.1
-    rew_scale_joint_pos_init = -1.0
+    rew_scale_joint_pos_init = -20.0
     # quadruped-specific reward terms (aligned with Unitree Go2 rough locomotion defaults)
-    rew_scale_feet_air_time = 1.0
+    rew_scale_feet_air_time = 0 #1.0
     rew_scale_dof_torques = -0.0002
     rew_scale_dof_acc = -2.5e-7
     rew_scale_undesired_contacts = -1.0
@@ -185,7 +191,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     goal_randomization_range = 3.0
     goal_randomization_range_min = 0.5
     goal_randomization_angle = math.pi
-    position_tolerance = 0.01
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]

@@ -443,14 +443,17 @@ class Go2PendulumEnv(DirectRLEnv):
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
-        net_contact_forces = self._contact_sensor.data.net_forces_w_history
-        cstr_termination_contacts = torch.any(
-            torch.max(torch.norm(net_contact_forces[:, :, self._base_id], dim=-1), dim=1)[0] > 1.0,
-            dim=1,
-        )
-        # Allow a grace period so brief settling contacts right after reset don't terminate.
-        contact_grace = self.episode_length_buf > math.ceil(self.cfg.base_contact_grace_s / self.step_dt)
-        cstr_termination_contacts = cstr_termination_contacts & contact_grace
+        if self.cfg.terminate_on_base_contact:
+            net_contact_forces = self._contact_sensor.data.net_forces_w_history
+            cstr_termination_contacts = torch.any(
+                torch.max(torch.norm(net_contact_forces[:, :, self._base_id], dim=-1), dim=1)[0] > 1.0,
+                dim=1,
+            )
+            # Allow a grace period so brief settling contacts right after reset don't terminate.
+            contact_grace = self.episode_length_buf > math.ceil(self.cfg.base_contact_grace_s / self.step_dt)
+            cstr_termination_contacts = cstr_termination_contacts & contact_grace
+        else:
+            cstr_termination_contacts = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
 
         self._base_contact_terminated = cstr_termination_contacts
 
@@ -458,7 +461,11 @@ class Go2PendulumEnv(DirectRLEnv):
 
         # Pendulum balance termination.
         curriculum_level = self._get_curriculum_level()
-        if self.cfg.use_pendulum and curriculum_level >= self.cfg.pendulum_termination_start_level:
+        if (
+            self.cfg.terminate_on_pendulum_failure
+            and self.cfg.use_pendulum
+            and curriculum_level >= self.cfg.pendulum_termination_start_level
+        ):
             pendulum_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
             pendulum_norm = torch.linalg.norm(pendulum_pos, dim=-1)
             if self.pendulum_failure_steps is None:
@@ -479,27 +486,38 @@ class Go2PendulumEnv(DirectRLEnv):
         # Position deviation termination.
         position_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         position_tolerance_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-        if self.target_state is not None:
+        if self.target_state is not None and (
+            self.cfg.terminate_on_position_max or self.cfg.terminate_on_position_timeout
+        ):
             base_pos_xy = self.robot.data.root_pos_w[:, :2] - env_origins[:, :2]
             target_xy = self.target_state[:, :2]
             position_deviation = torch.linalg.norm(base_pos_xy - target_xy, dim=-1)
-            position_terminated = position_deviation > self.cfg.max_displacement
-            if self.position_failure_steps is None:
-                self.position_failure_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
-            position_failing = position_deviation > self.cfg.position_tolerance
-            self.position_failure_steps = torch.where(
-                position_failing,
-                self.position_failure_steps + 1,
-                torch.zeros_like(self.position_failure_steps),
-            )
-            failure_threshold = max(1, int(self.cfg.position_failure_timeout_s / self.step_dt))
-            position_tolerance_terminated = self.position_failure_steps >= failure_threshold
+            if self.cfg.terminate_on_position_max:
+                position_terminated = position_deviation > self.cfg.max_displacement
+            if self.cfg.terminate_on_position_timeout:
+                if self.position_failure_steps is None:
+                    self.position_failure_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+                position_failing = position_deviation > self.cfg.position_tolerance
+                self.position_failure_steps = torch.where(
+                    position_failing,
+                    self.position_failure_steps + 1,
+                    torch.zeros_like(self.position_failure_steps),
+                )
+                failure_threshold = max(1, int(self.cfg.position_failure_timeout_s / self.step_dt))
+                position_tolerance_terminated = self.position_failure_steps >= failure_threshold
+            elif self.position_failure_steps is not None:
+                self.position_failure_steps.zero_()
+        elif self.position_failure_steps is not None:
+            self.position_failure_steps.zero_()
 
         # Tilt termination.
         roll, pitch, _ = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)
         tilt_cos = torch.cos(roll) * torch.cos(pitch)
         tilt_angle = torch.acos(torch.clamp(tilt_cos, -1.0, 1.0))
-        tilt_terminated = tilt_angle > (self.cfg.tilt_terminate_angle_deg * math.pi / 180.0)
+        if self.cfg.terminate_on_tilt:
+            tilt_terminated = tilt_angle > (self.cfg.tilt_terminate_angle_deg * math.pi / 180.0)
+        else:
+            tilt_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
 
         terminated = (
             cstr_termination_contacts
@@ -509,7 +527,11 @@ class Go2PendulumEnv(DirectRLEnv):
             | tilt_terminated
         )
 
-        if self.cfg.use_pendulum and self._pendulum_contact_sensor is not None:
+        if (
+            self.cfg.terminate_on_pendulum_contact
+            and self.cfg.use_pendulum
+            and self._pendulum_contact_sensor is not None
+        ):
             pendulum_contact_forces = self._pendulum_contact_sensor.data.net_forces_w
             pendulum_contact = torch.any(
                 torch.norm(pendulum_contact_forces, dim=-1) > self.cfg.pendulum_contact_force_threshold,
