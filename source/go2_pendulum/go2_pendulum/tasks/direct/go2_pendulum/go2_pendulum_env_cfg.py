@@ -179,7 +179,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     rew_scale_feet_air_time = 10.0
     rew_scale_dof_torques = -0.0002
     rew_scale_dof_acc = -1.25e-7
-    rew_scale_undesired_contacts = -20.0
+    rew_scale_undesired_contacts = -100.0
 
     # contact/air-time thresholds
     feet_air_time_threshold_s = 0.5
