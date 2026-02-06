@@ -76,7 +76,7 @@ GO2_PENDULUM_CFG = ArticulationCfg(
 class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # env
     decimation = 4
-    episode_length_s = 10.0
+    episode_length_s = 20.0
     # - spaces definition
     # Action mapping (per leg joint) derived from URDF joint limits.
     # Order matches leg_joint_names.
@@ -160,8 +160,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     position_tolerance = 0.1  # meters
     max_displacement = 5.0  # meters
     pendulum_failure_angle_deg = 6.0  # degrees
-    pendulum_failure_timeout_s = 3.0  # seconds
-    position_failure_timeout_s = 8.0  # seconds
+    pendulum_failure_timeout_s = 6.0  # seconds
+    position_failure_timeout_s = 10.0  # seconds
 
     # reward scales
     rew_scale_alive = 0
