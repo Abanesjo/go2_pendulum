@@ -12,7 +12,7 @@ from .go2_pendulum_env_cfg import Go2PendulumEnvCfg
 class Go2PendulumFlatEnvCfg(Go2PendulumEnvCfg):
     """Flat terrain variant without height scan observations."""
 
-    rough_terrain = True
+    rough_terrain = False
     use_height_scan = False
     enable_height_scanner = False
     height_scan_debug_vis = False

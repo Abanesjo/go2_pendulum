@@ -40,6 +40,15 @@ class Go2PendulumEnv(DirectRLEnv):
             self._feet_ids_sensor.append(id_list[0])
         self._feet_ids_sensor = torch.tensor(self._feet_ids_sensor, device=self.device, dtype=torch.long)
 
+        self._pendulum_ee_id = None
+        self._pendulum_ee_axis = None
+        if self.cfg.use_pendulum:
+            pendulum_ee_ids, _ = self.robot.find_bodies("pendulum_ee")
+            if len(pendulum_ee_ids) != 1:
+                raise RuntimeError(f"Expected exactly one body for 'pendulum_ee', got {pendulum_ee_ids}.")
+            self._pendulum_ee_id = pendulum_ee_ids[0]
+            self._pendulum_ee_axis = torch.tensor([0.0, 0.0, 1.0], device=self.device, dtype=torch.float32)
+
         self.gait_indices = torch.zeros(
             self.num_envs,
             dtype=torch.float,
@@ -360,14 +369,20 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
             pendulum_joint_pos = torch.nan_to_num(pendulum_joint_pos, nan=0.0, posinf=math.pi, neginf=-math.pi)
             pendulum_joint_vel = torch.nan_to_num(pendulum_joint_vel, nan=0.0, posinf=100.0, neginf=-100.0)
-            pendulum_norm = torch.linalg.norm(pendulum_joint_pos, dim=1)
+            if self._pendulum_ee_id is not None and hasattr(self.robot.data, "body_quat_w"):
+                pendulum_quat = self.robot.data.body_quat_w[:, self._pendulum_ee_id]
+                pendulum_up = math_utils.quat_apply(pendulum_quat, self._pendulum_ee_axis)
+                pendulum_norm = torch.acos(torch.clamp(pendulum_up[:, 2], -1.0, 1.0))
+            else:
+                pendulum_norm = torch.linalg.norm(pendulum_joint_pos, dim=1)
             pendulum_vel_norm = torch.linalg.norm(pendulum_joint_vel, dim=1)
         else:
             pendulum_norm = torch.zeros(self.num_envs, device=self.device)
             pendulum_vel_norm = torch.zeros(self.num_envs, device=self.device)
 
-        upright_reward = torch.exp(-pendulum_norm)
-        pendulum_velocity_reward = torch.exp(-pendulum_vel_norm)
+        # Pendulum magnitude (penalize via negative scales in config).
+        upright_reward = pendulum_norm
+        pendulum_velocity_reward = pendulum_vel_norm
 
         # angular velocity reward: reward for not spinning around z-axis
         root_ang_vel = self.robot.data.root_ang_vel_w

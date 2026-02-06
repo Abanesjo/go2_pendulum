@@ -130,7 +130,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_height_scanner = True
     height_scan_debug_vis = False
     return_teacher_obs = False
-    use_pendulum = False
+    use_pendulum = True
     rough_terrain = True
 
     # observation noise (uniform in [-scale, scale])
@@ -152,33 +152,33 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # termination conditions
     terminate_on_base_contact = True
-    terminate_on_pendulum_failure = False
+    terminate_on_pendulum_failure = True
     terminate_on_position_max = True
     terminate_on_position_timeout = False
     terminate_on_tilt = True
     terminate_on_pendulum_contact = True
     position_tolerance = 0.1  # meters
     max_displacement = 5.0  # meters
-    pendulum_failure_angle_deg = 8.0  # degrees
+    pendulum_failure_angle_deg = 6.0  # degrees
     pendulum_failure_timeout_s = 3.0  # seconds
     position_failure_timeout_s = 8.0  # seconds
 
     # reward scales
     rew_scale_alive = 0
     rew_scale_terminated = -5000.0
-    rew_scale_upright = 0 #1.6
-    rew_scale_position = 16.0
-    rew_scale_yaw_alignment = 4.0
-    rew_scale_pendulum_velocity = 0 #5.0
+    rew_scale_upright = -15.0
+    rew_scale_position = 20.0
+    rew_scale_yaw_alignment = 0.0
+    rew_scale_pendulum_velocity = -2.5
     rew_scale_angular_velocity = 0 #5.0
-    rew_scale_balanced_movement = 0 #2.0
+    rew_scale_balanced_movement = 2.0
     rew_scale_tilt = -5.0
     rew_scale_action_delta = 0.0
     rew_scale_joint_pos_init = -4.0
     # quadruped-specific reward terms (aligned with Unitree Go2 rough locomotion defaults)
     rew_scale_feet_air_time = 10.0
     rew_scale_dof_torques = -0.0002
-    rew_scale_dof_acc = -1.25e-7
+    rew_scale_dof_acc = -2.5e-7
     rew_scale_undesired_contacts = -100.0
 
     # contact/air-time thresholds
