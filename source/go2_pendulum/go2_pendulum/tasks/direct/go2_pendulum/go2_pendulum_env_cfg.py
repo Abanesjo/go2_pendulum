@@ -166,10 +166,10 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # reward scales
     rew_scale_alive = 0
     rew_scale_terminated = -5000.0
-    rew_scale_upright = -15.0
+    rew_scale_upright = -20.0
     rew_scale_position = 20.0
     rew_scale_yaw_alignment = 0.0
-    rew_scale_pendulum_velocity = -2.5
+    rew_scale_pendulum_velocity = -1.25
     rew_scale_angular_velocity = 0 #5.0
     rew_scale_balanced_movement = 2.0
     rew_scale_tilt = -5.0
