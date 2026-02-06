@@ -371,7 +371,8 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_vel = torch.nan_to_num(pendulum_joint_vel, nan=0.0, posinf=100.0, neginf=-100.0)
             if self._pendulum_ee_id is not None and hasattr(self.robot.data, "body_quat_w"):
                 pendulum_quat = self.robot.data.body_quat_w[:, self._pendulum_ee_id]
-                pendulum_up = math_utils.quat_apply(pendulum_quat, self._pendulum_ee_axis)
+                pendulum_axis = self._pendulum_ee_axis.expand(pendulum_quat.shape[0], -1)
+                pendulum_up = math_utils.quat_apply(pendulum_quat, pendulum_axis)
                 pendulum_norm = torch.acos(torch.clamp(pendulum_up[:, 2], -1.0, 1.0))
             else:
                 pendulum_norm = torch.linalg.norm(pendulum_joint_pos, dim=1)
