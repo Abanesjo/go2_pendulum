@@ -71,7 +71,7 @@ GO2_PENDULUM_CFG = ArticulationCfg(
 class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # env
     decimation = 4
-    episode_length_s = 8.0
+    episode_length_s = 10.0
     # - spaces definition
     action_scale = 0.25
     action_space = 12
@@ -119,7 +119,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
     pendulum_angle_min = 0.0 * math.pi / 180.0
     pendulum_angle_max = 0.1 * math.pi / 180.0
-    pendulum_terminate_angle_rad = 0.1 * math.pi / 180.0
+    pendulum_terminate_angle_rad = 5.0 * math.pi / 180.0
     pendulum_terminate_duration_s = 4.0
     position_terminate_duration_s = 4.0
 
