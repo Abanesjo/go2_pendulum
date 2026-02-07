@@ -11,13 +11,12 @@ import torch
 from collections.abc import Sequence
 
 import isaaclab.sim as sim_utils
+import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
-from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.markers import VisualizationMarkers
-from isaaclab.markers.config import RAY_CASTER_MARKER_CFG
+from isaaclab.sensors import ContactSensor
 from isaaclab.utils.math import sample_uniform
-import isaaclab.utils.math as math_utils
 
 from .go2_pendulum_env_cfg import Go2PendulumEnvCfg
 
@@ -31,10 +30,10 @@ class Go2PendulumEnv(DirectRLEnv):
         # gait shaping
         self._feet_ids = []
         foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
-
         for name in foot_names:
             id_list, _ = self.robot.find_bodies(name)
             self._feet_ids.append(id_list[0])
+
         self._feet_ids_sensor = []
         for name in foot_names:
             id_list, _ = self._contact_sensor.find_bodies(name)
@@ -62,7 +61,7 @@ class Go2PendulumEnv(DirectRLEnv):
             requires_grad=False,
         )
 
-        # Resolve leg and pendulum joints.
+        # Resolve leg joints.
         leg_joint_ids = []
         for idx, name in enumerate(self.robot.joint_names):
             if name.endswith("_hip_joint") or name.endswith("_thigh_joint") or name.endswith("_calf_joint"):
@@ -83,8 +82,14 @@ class Go2PendulumEnv(DirectRLEnv):
                     raise RuntimeError(f"Expected exactly one joint for '{joint_name}', got {joint_idx}.")
                 self._pendulum_dof_ids.append(joint_idx[0])
             self._pendulum_dof_ids = torch.tensor(self._pendulum_dof_ids, device=self.device, dtype=torch.long)
+
+            pendulum_ee_body_id, _ = self.robot.find_bodies("pendulum_ee")
+            if len(pendulum_ee_body_id) != 1:
+                raise RuntimeError(f"Expected exactly one body for 'pendulum_ee', got {pendulum_ee_body_id}.")
+            self._pendulum_ee_body_id = pendulum_ee_body_id[0]
         else:
             self._pendulum_dof_ids = torch.tensor([], device=self.device, dtype=torch.long)
+            self._pendulum_ee_body_id = None
 
         # Joint position command (deviation from default joint positions).
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
@@ -104,53 +109,27 @@ class Go2PendulumEnv(DirectRLEnv):
         self._marker_locations = None
         self._marker_up = torch.tensor([0.0, 0.0, 1.0])
 
-        # Logging
-        reward_keys = [
+        # Logging.
+        episode_sum_keys = [
             "track_lin_vel_xy_exp",
             "track_ang_vel_z_exp",
             "pendulum_upright",
             "pendulum_velocity",
             "balanced_movement",
+            "rew_action_rate",
+            "torque",
+            "raibert_heuristic",
+            "orient",
+            "lin_vel_z",
+            "dof_vel",
+            "ang_vel_xy",
+            "feet_clearance",
+            "tracking_contacts_shaped_force",
+            "termination_penalty",
         ]
-        if self.cfg.raibert_heuristic_reward_scale != 0.0:
-            reward_keys.append("raibert_heuristic")
-        reward_keys.append("feet_air_time")
-        penalty_keys = [
-            "action_rate_penalty",
-            "orient_penalty",
-            "lin_vel_z_penalty",
-            "dof_vel_penalty",
-            "ang_vel_xy_penalty",
-        ]
-        if self.cfg.feet_clearance_penalty_scale != 0.0:
-            penalty_keys.append("feet_clearance_penalty")
-        if self.cfg.tracking_contacts_shaped_force_penalty_scale != 0.0:
-            penalty_keys.append("tracking_contacts_shaped_force_penalty")
-        penalty_keys.extend(
-            [
-                "undesired_contacts_penalty",
-                "termination_penalty",
-                "dof_torques_l2_penalty",
-                "dof_acc_l2_penalty",
-            ]
-        )
-        episode_sum_keys = reward_keys + penalty_keys
         self._episode_sums = {
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device) for key in episode_sum_keys
         }
-        self._penalty_keys = set(penalty_keys)
-
-        # Effort limit for saturation logging (used by DC motor model).
-        base_legs_actuator = self.cfg.robot_cfg.actuators.get("base_legs")
-        effort_limit = None if base_legs_actuator is None else base_legs_actuator.effort_limit
-        if effort_limit is None:
-            effort_limit = float("inf")
-        self._leg_effort_limit = torch.tensor(effort_limit, device=self.device, dtype=torch.float32)
-
-        # Track termination causes for accurate logging.
-        self._base_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-        self._pendulum_angle_failure_steps = None
-        self._position_failure_steps = None
 
         self.last_actions = torch.zeros(
             self.num_envs,
@@ -163,12 +142,11 @@ class Go2PendulumEnv(DirectRLEnv):
 
         # Get specific body indices.
         self._base_id, _ = self._contact_sensor.find_bodies("base")
-        undesired_contact_ids, _ = self._contact_sensor.find_bodies(".*_thigh")
-        self._undesired_contact_body_ids = (
-            torch.tensor(undesired_contact_ids, device=self.device, dtype=torch.long)
-            if len(undesired_contact_ids) > 0
-            else None
-        )
+
+        # Track termination causes for accurate logging.
+        self._base_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self._pendulum_angle_failure_steps = None
+        self._position_failure_steps = None
 
         # add handle for debug visualization (this is set to a valid handle inside set_debug_vis)
         self.set_debug_vis(self.cfg.debug_vis)
@@ -179,24 +157,25 @@ class Go2PendulumEnv(DirectRLEnv):
         self._pendulum_contact_sensor = None
         if self.cfg.use_pendulum:
             self._pendulum_contact_sensor = ContactSensor(self.cfg.pendulum_contact_sensor)
+
         # register assets and sensors so they get replicated and updated
         self.scene.articulations["robot"] = self.robot
         self.scene.sensors["contact_sensor"] = self._contact_sensor
         if self._pendulum_contact_sensor is not None:
             self.scene.sensors["pendulum_contact_sensor"] = self._pendulum_contact_sensor
-        self._height_scanner = None
-        if self.cfg.enable_height_scanner and self.cfg.height_scanner is not None:
-            self._height_scanner = RayCaster(self.cfg.height_scanner)
-            self.scene.sensors["height_scanner"] = self._height_scanner
+
         # add ground plane
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
         self._terrain = self.cfg.terrain.class_type(self.cfg.terrain)
+
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
+
         # we need to explicitly filter collisions for CPU simulation
         if self.device == "cpu":
-            self.scene.filter_collisions(global_prim_paths=[self.cfg.terrain.prim_path])
+            self.scene.filter_collisions(global_prim_paths=[])
+
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
@@ -210,30 +189,26 @@ class Go2PendulumEnv(DirectRLEnv):
         self._actions = actions.clone()
         self._processed_actions = self.cfg.action_scale * self._actions
 
-        self.desired_joint_pos = self.robot.data.default_joint_pos.clone()
-        self.desired_joint_pos[:, self._leg_dof_ids] = (
+        self.desired_joint_pos = (
             self.robot.data.default_joint_pos[:, self._leg_dof_ids] + self._processed_actions
         )
 
         self._update_commands()
 
     def _apply_action(self) -> None:
-        # Send position targets; actuator model handles PD and torque limits.
         self.robot.set_joint_position_target(
-            self.desired_joint_pos[:, self._leg_dof_ids],
+            self.desired_joint_pos,
             joint_ids=self._leg_dof_ids,
         )
 
     def _get_observations(self) -> dict:
         self._previous_actions = self._actions.clone()
-        height_data = None
-        if self._height_scanner is not None:
-            height_data = (
-                self._height_scanner.data.pos_w[:, 2].unsqueeze(1) - self._height_scanner.data.ray_hits_w[..., 2] - 0.5
-            ).clip(-1.0, 1.0)
-        leg_joint_pos = self.robot.data.joint_pos[:, self._leg_dof_ids] - self.robot.data.default_joint_pos[:, self._leg_dof_ids]
+
+        leg_joint_pos = (
+            self.robot.data.joint_pos[:, self._leg_dof_ids] - self.robot.data.default_joint_pos[:, self._leg_dof_ids]
+        )
         leg_joint_vel = self.robot.data.joint_vel[:, self._leg_dof_ids]
-        if self.cfg.use_pendulum:
+        if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
             pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
             pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
         else:
@@ -241,7 +216,7 @@ class Go2PendulumEnv(DirectRLEnv):
                 self.num_envs,
                 self._pendulum_dof_count,
                 device=self.device,
-                dtype=self.robot.data.joint_pos.dtype,
+                dtype=leg_joint_pos.dtype,
             )
             pendulum_joint_vel = torch.zeros_like(pendulum_joint_pos)
 
@@ -255,38 +230,17 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_pos,
             pendulum_joint_vel,
         ]
-        if self.cfg.use_height_scan:
-            if height_data is None:
-                raise RuntimeError("Height scan requested but height scanner is disabled.")
-            policy_tensors.append(height_data)
-        policy_tensors.append(self._actions)
-        policy_obs = torch.cat(policy_tensors, dim=-1)
-        observations = {"policy": policy_obs}
-        if self.cfg.return_teacher_obs:
-            if height_data is None:
-                raise RuntimeError("Teacher observations require the height scanner to be enabled.")
-            teacher_obs = torch.cat(
-                [
-                    self.robot.data.root_lin_vel_b,
-                    self.robot.data.root_ang_vel_b,
-                    self.robot.data.projected_gravity_b,
-                    self._commands,
-                    leg_joint_pos,
-                    leg_joint_vel,
-                    pendulum_joint_pos,
-                    pendulum_joint_vel,
-                    height_data,
-                    self._actions,
-                ],
-                dim=-1,
-            )
-            observations["teacher"] = teacher_obs
+
+        policy_tensors.extend([self._actions, self.clock_inputs])
+
+        observations = {"policy": torch.cat(policy_tensors, dim=-1)}
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
         # linear velocity tracking
         lin_vel_error = torch.sum(torch.square(self._commands[:, :2] - self.robot.data.root_lin_vel_b[:, :2]), dim=1)
         lin_vel_error_mapped = torch.exp(-lin_vel_error / 0.25)
+
         # yaw rate tracking
         yaw_rate_error = torch.square(self._commands[:, 2] - self.robot.data.root_ang_vel_b[:, 2])
         yaw_rate_error_mapped = torch.exp(-yaw_rate_error / 0.25)
@@ -297,7 +251,8 @@ class Go2PendulumEnv(DirectRLEnv):
         ) * (self.cfg.action_scale**2)
 
         rew_action_rate += torch.sum(
-            torch.square(self._actions - 2 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]), dim=1
+            torch.square(self._actions - 2 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]),
+            dim=1,
         ) * (self.cfg.action_scale**2)
 
         # penalize non-vertical orientation (projected gravity on xy plane)
@@ -307,9 +262,7 @@ class Go2PendulumEnv(DirectRLEnv):
         )
 
         # penalize vertical velocity (z-component of base linear velocity)
-        lin_vel_z = torch.nan_to_num(self.robot.data.root_lin_vel_w[:, 2], nan=0.0, posinf=0.0, neginf=0.0)
-        lin_vel_z = torch.clamp(lin_vel_z, -self.cfg.lin_vel_z_penalty_clip, self.cfg.lin_vel_z_penalty_clip)
-        rew_lin_vel_z = lin_vel_z * lin_vel_z
+        rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[:, 2])
 
         # penalize high joint velocities
         rew_dof_vel = torch.sum(
@@ -323,16 +276,23 @@ class Go2PendulumEnv(DirectRLEnv):
             dim=1,
         )
 
-        # pendulum rewards from joint angles/velocities (target is zero)
-        if self.cfg.use_pendulum:
-            pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
+        if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0 and self._pendulum_ee_body_id is not None:
+            pendulum_ee_quat_w = self.robot.data.body_quat_w[:, self._pendulum_ee_body_id]
+            # pendulum_ee body-frame z-axis dotted with world z-axis.
+            # For IsaacLab quaternions in (x, y, z, w), this equals 1 - 2*(x^2 + y^2).
+            pendulum_cos_angle = 1.0 - 2.0 * torch.sum(torch.square(pendulum_ee_quat_w[:, :2]), dim=1)
+            pendulum_cos_angle = torch.clamp(pendulum_cos_angle, -1.0 + 1e-6, 1.0 - 1e-6)
+            pendulum_angle = torch.acos(pendulum_cos_angle)
+            pendulum_angle_deg = pendulum_angle * (180.0 / math.pi)
+            pendulum_upright_reward = torch.pow(pendulum_angle_deg, 4)
+
             pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
-            pendulum_angle_norm = torch.linalg.norm(pendulum_joint_pos, dim=1)
-            pendulum_vel_norm = torch.linalg.norm(pendulum_joint_vel, dim=1)
-            pendulum_upright_reward = torch.exp(-pendulum_angle_norm)
-            pendulum_velocity_reward = torch.exp(-pendulum_vel_norm)
+            pendulum_joint_vel_deg = pendulum_joint_vel * (180.0 / math.pi)
+            pendulum_vel_norm = torch.linalg.norm(pendulum_joint_vel_deg, dim=1)
+            pendulum_velocity_reward = pendulum_vel_norm
+
             base_speed = torch.linalg.norm(self.robot.data.root_lin_vel_b[:, :2], dim=1)
-            balanced_movement_reward = torch.exp(-pendulum_angle_norm * base_speed)
+            balanced_movement_reward = torch.exp(-pendulum_angle * base_speed)
             upright_scaled = pendulum_upright_reward * self.cfg.pendulum_upright_reward_scale
             balanced_movement_scale = self.cfg.balanced_movement_reward_scale * upright_scaled / 16.0
         else:
@@ -340,6 +300,9 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_velocity_reward = torch.zeros(self.num_envs, device=self.device)
             balanced_movement_reward = torch.zeros(self.num_envs, device=self.device)
             balanced_movement_scale = torch.zeros(self.num_envs, device=self.device)
+
+        # penalize high torques from the actuator model
+        rew_torque = torch.sum(torch.square(self.robot.data.applied_torque[:, self._leg_dof_ids]), dim=1)
 
         self.last_actions = torch.roll(self.last_actions, 1, 2)
         self.last_actions[:, :, 0] = self._actions[:]
@@ -349,7 +312,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
         phases = 1 - torch.abs(1.0 - torch.clamp((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
         foot_height = self.foot_positions_w[:, :, 2]
-        target_height = 0.10 * phases + 0.03
+        target_height = 0.08 * phases + 0.02
         rew_foot_clearance = torch.square(target_height - foot_height) * (1 - self.desired_contact_states)
         rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1)
 
@@ -363,33 +326,8 @@ class Go2PendulumEnv(DirectRLEnv):
         rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4
 
         rew_raibert_heuristic = self._reward_raibert_heuristic()
-
-        # feet air time
-        first_contact = self._contact_sensor.compute_first_contact(self.step_dt)[:, self._feet_ids_sensor]
-        last_air_time = self._contact_sensor.data.last_air_time[:, self._feet_ids_sensor]
-        rew_feet_air_time = torch.sum((last_air_time - 0.5) * first_contact, dim=1) * (
-            torch.norm(self._commands[:, :2], dim=1) > 0.1
-        )
-
-        # undesired contacts (e.g. thighs)
-        if self._undesired_contact_body_ids is not None:
-            net_contact_forces = self._contact_sensor.data.net_forces_w_history
-            is_contact = (
-                torch.max(
-                    torch.norm(net_contact_forces[:, :, self._undesired_contact_body_ids], dim=-1), dim=1
-                )[0]
-                > 1.0
-            )
-            rew_undesired_contacts = torch.sum(is_contact, dim=1)
-        else:
-            rew_undesired_contacts = torch.zeros(self.num_envs, device=self.device)
-
         early_terminated = self.reset_terminated & ~self.reset_time_outs
         rew_termination_penalty = early_terminated.float() * self.cfg.termination_penalty
-
-        # joint torques and accelerations
-        rew_dof_torques_l2 = torch.sum(torch.square(self.robot.data.applied_torque[:, self._leg_dof_ids]), dim=1)
-        rew_dof_acc_l2 = torch.sum(torch.square(self.robot.data.joint_acc[:, self._leg_dof_ids]), dim=1)
 
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale,
@@ -397,43 +335,44 @@ class Go2PendulumEnv(DirectRLEnv):
             "pendulum_upright": pendulum_upright_reward * self.cfg.pendulum_upright_reward_scale,
             "pendulum_velocity": pendulum_velocity_reward * self.cfg.pendulum_vel_reward_scale,
             "balanced_movement": balanced_movement_reward * balanced_movement_scale,
-            "action_rate_penalty": rew_action_rate * self.cfg.action_rate_penalty_scale,
+            "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
+            "torque": rew_torque * self.cfg.torque_reward_scale,
             "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale,
-            "orient_penalty": rew_orient * self.cfg.orient_penalty_scale,
-            "lin_vel_z_penalty": rew_lin_vel_z * self.cfg.lin_vel_z_penalty_scale,
-            "dof_vel_penalty": rew_dof_vel * self.cfg.dof_vel_penalty_scale,
-            "ang_vel_xy_penalty": rew_ang_vel_xy * self.cfg.ang_vel_xy_penalty_scale,
-            "feet_clearance_penalty": rew_feet_clearance * self.cfg.feet_clearance_penalty_scale,
-            "tracking_contacts_shaped_force_penalty": (
-                rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_penalty_scale
+            "orient": rew_orient * self.cfg.orient_reward_scale,
+            "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
+            "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,
+            "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,
+            "feet_clearance": rew_feet_clearance * self.cfg.feet_clearance_reward_scale,
+            "tracking_contacts_shaped_force": (
+                rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale
             ),
-            "feet_air_time": rew_feet_air_time * self.cfg.feet_air_time_reward_scale,
-            "undesired_contacts_penalty": rew_undesired_contacts * self.cfg.undesired_contact_penalty_scale,
             "termination_penalty": rew_termination_penalty,
-            "dof_torques_l2_penalty": rew_dof_torques_l2 * self.cfg.dof_torques_penalty_scale,
-            "dof_acc_l2_penalty": rew_dof_acc_l2 * self.cfg.dof_accel_penalty_scale,
         }
 
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
+
         # Logging
         for key, value in rewards.items():
-            if key in self._episode_sums:
-                self._episode_sums[key] += value
+            self._episode_sums[key] += value
+
         return reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
+
         net_contact_forces = self._contact_sensor.data.net_forces_w_history
         cstr_termination_contacts = torch.any(
             torch.max(torch.norm(net_contact_forces[:, :, self._base_id], dim=-1), dim=1)[0] > 1.0,
             dim=1,
         )
+
         # Allow a grace period so brief settling contacts right after reset don't terminate.
         contact_grace = self.episode_length_buf > math.ceil(self.cfg.base_contact_grace_s / self.step_dt)
         cstr_termination_contacts = cstr_termination_contacts & contact_grace
 
         self._base_contact_terminated = cstr_termination_contacts
         terminated = cstr_termination_contacts
+
         if self.cfg.use_pendulum and self._pendulum_contact_sensor is not None:
             pendulum_contact_forces = self._pendulum_contact_sensor.data.net_forces_w
             pendulum_contact = torch.any(
@@ -441,6 +380,7 @@ class Go2PendulumEnv(DirectRLEnv):
                 dim=1,
             )
             terminated = terminated | pendulum_contact
+
         if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
             pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
             pendulum_angle_norm = torch.linalg.norm(pendulum_joint_pos, dim=1)
@@ -457,6 +397,7 @@ class Go2PendulumEnv(DirectRLEnv):
             failure_steps_threshold = max(1, math.ceil(self.cfg.pendulum_terminate_duration_s / self.step_dt))
             pendulum_angle_terminated = self._pendulum_angle_failure_steps >= failure_steps_threshold
             terminated = terminated | pendulum_angle_terminated
+
         if self.cfg.tracking_mode and self.target_state is not None:
             env_origins = self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
             base_pos_xy = self.robot.data.root_pos_w[:, :2] - env_origins[:, :2]
@@ -472,33 +413,22 @@ class Go2PendulumEnv(DirectRLEnv):
             position_failure_threshold = max(1, math.ceil(self.cfg.position_terminate_duration_s / self.step_dt))
             position_terminated = self._position_failure_steps >= position_failure_threshold
             terminated = terminated | position_terminated
-        return terminated, time_out
 
-    def _update_terrain_curriculum(self, env_ids: torch.Tensor) -> None:
-        if self._terrain.terrain_origins is None or self._terrain.cfg.terrain_generator is None:
-            return
-        if env_ids.numel() == 0:
-            return
-        distance = torch.norm(
-            self.robot.data.root_pos_w[env_ids, :2] - self._terrain.env_origins[env_ids, :2],
-            dim=1,
-        )
-        move_up = distance > self._terrain.cfg.terrain_generator.size[0] / 2
-        move_down = distance < torch.norm(self._commands[env_ids, :2], dim=1) * self.max_episode_length_s * 0.5
-        move_down &= ~move_up
-        self._terrain.update_env_origins(env_ids, move_up, move_down)
+        return terminated, time_out
 
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self.robot._ALL_INDICES
         if not torch.is_tensor(env_ids):
             env_ids = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
-        self._update_terrain_curriculum(env_ids)
+
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
+
         if len(env_ids) == self.num_envs:
             # Spread out the resets to avoid spikes in training when many environments reset at a similar time.
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
+
         self._actions[env_ids] = 0.0
         self._previous_actions[env_ids] = 0.0
 
@@ -514,6 +444,7 @@ class Go2PendulumEnv(DirectRLEnv):
             # Sample new targets.
             if self.target_state is None:
                 self.target_state = torch.zeros(self.num_envs, 3, device=self.device)
+
             num_reset_envs = env_ids.shape[0]
             goal_range = self.cfg.goal_randomization_range
             goal_noise_x = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
@@ -529,23 +460,42 @@ class Go2PendulumEnv(DirectRLEnv):
             self.target_state[env_ids, 2] = goal_yaw
         else:
             self.target_state = None
-            self._commands[env_ids] = torch.zeros_like(self._commands[env_ids]).uniform_(-1.0, 1.0)
+            num_reset_envs = env_ids.shape[0]
+            self._commands[env_ids, 0] = sample_uniform(
+                -self.cfg.command_lin_vel_x_max,
+                self.cfg.command_lin_vel_x_max,
+                (num_reset_envs,),
+                self.device,
+            )
+            self._commands[env_ids, 1] = sample_uniform(
+                -self.cfg.command_lin_vel_y_max,
+                self.cfg.command_lin_vel_y_max,
+                (num_reset_envs,),
+                self.device,
+            )
+            self._commands[env_ids, 2] = sample_uniform(
+                -self.cfg.command_ang_vel_z_max,
+                self.cfg.command_ang_vel_z_max,
+                (num_reset_envs,),
+                self.device,
+            )
 
         # Reset robot state.
         joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
         joint_vel = self.robot.data.default_joint_vel[env_ids].clone()
 
-        for joint_idx in self._pendulum_dof_ids:
-            signs = torch.randint(0, 2, joint_pos[:, joint_idx].shape, device=joint_pos.device) * 2 - 1
-            magnitudes = sample_uniform(
-                self.cfg.pendulum_angle_min,
-                self.cfg.pendulum_angle_max,
-                joint_pos[:, joint_idx].shape,
-                joint_pos.device,
-            )
-            joint_pos[:, joint_idx] += signs.float() * magnitudes
+        if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
+            for joint_idx in self._pendulum_dof_ids.tolist():
+                signs = torch.randint(0, 2, joint_pos[:, joint_idx].shape, device=joint_pos.device) * 2 - 1
+                magnitudes = sample_uniform(
+                    self.cfg.pendulum_angle_min,
+                    self.cfg.pendulum_angle_max,
+                    joint_pos[:, joint_idx].shape,
+                    joint_pos.device,
+                )
+                joint_pos[:, joint_idx] += signs.float() * magnitudes
 
-        default_root_state = self.robot.data.default_root_state[env_ids]
+        default_root_state = self.robot.data.default_root_state[env_ids].clone()
         default_root_state[:, :3] += self._terrain.env_origins[env_ids]
         self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
@@ -557,18 +507,14 @@ class Go2PendulumEnv(DirectRLEnv):
 
         # Logging
         extras = dict()
-        for key in self._episode_sums.keys():
+        for key in self._episode_sums:
             episodic_sum_avg = torch.mean(self._episode_sums[key][env_ids])
-            prefix = "Episode_Penalty/" if key in self._penalty_keys else "Episode_Reward/"
-            extras[prefix + key] = episodic_sum_avg / self.max_episode_length_s
+            extras["Episode_Reward/" + key] = episodic_sum_avg / self.max_episode_length_s
             self._episode_sums[key][env_ids] = 0.0
+
         self.extras["log"] = dict()
         self.extras["log"].update(extras)
-        extras = dict()
-        if self._terrain.terrain_origins is not None:
-            terrain_level = torch.mean(self._terrain.terrain_levels[env_ids].float()).item()
-            extras["Episode_Curriculum/terrain_level"] = terrain_level
-        self.extras["log"].update(extras)
+
         extras = dict()
         base_contact_resets = self._base_contact_terminated[env_ids] & self.reset_terminated[env_ids]
         extras["Episode_Termination/base_contact"] = torch.count_nonzero(base_contact_resets).item()
@@ -587,61 +533,55 @@ class Go2PendulumEnv(DirectRLEnv):
                 self.current_vel_visualizer = VisualizationMarkers(self.cfg.current_vel_visualizer_cfg)
             if self.cfg.tracking_mode and not hasattr(self, "target_visualizer"):
                 self.target_visualizer = VisualizationMarkers(self.cfg.target_marker_cfg)
-            if (
-                self._height_scanner is not None
-                and self.cfg.height_scan_debug_vis
-                and not hasattr(self, "height_scan_visualizer")
-            ):
-                height_scan_cfg = RAY_CASTER_MARKER_CFG.replace(prim_path="/Visuals/HeightScan")
-                height_scan_cfg.markers["hit"].radius = 0.01
-                self.height_scan_visualizer = VisualizationMarkers(height_scan_cfg)
+
             # set their visibility to true
             self.goal_vel_visualizer.set_visibility(True)
             self.current_vel_visualizer.set_visibility(True)
             if self.cfg.tracking_mode and self.target_visualizer is not None:
                 self.target_visualizer.set_visibility(True)
-            if self._height_scanner is not None and self.cfg.height_scan_debug_vis:
-                self.height_scan_visualizer.set_visibility(True)
         else:
             if hasattr(self, "goal_vel_visualizer"):
                 self.goal_vel_visualizer.set_visibility(False)
                 self.current_vel_visualizer.set_visibility(False)
             if hasattr(self, "target_visualizer") and self.target_visualizer is not None:
                 self.target_visualizer.set_visibility(False)
-            if hasattr(self, "height_scan_visualizer"):
-                self.height_scan_visualizer.set_visibility(False)
 
     def _debug_vis_callback(self, event):
         # check if robot is initialized
         # note: this is needed in-case the robot is de-initialized. we can't access the data
         if not self.robot.is_initialized:
             return
+
         # get marker location
         # -- base state
         base_pos_w = self.robot.data.root_pos_w.clone()
-        # Place velocity arrows at the base frame height.
+        base_pos_w[:, 2] += 0.5
+
         # -- resolve the scales and quaternions
         vel_des_arrow_scale, vel_des_arrow_quat = self._resolve_xy_velocity_to_arrow(self._commands[:, :2])
         vel_arrow_scale, vel_arrow_quat = self._resolve_xy_velocity_to_arrow(self.robot.data.root_lin_vel_b[:, :2])
+
         # display markers
         self.goal_vel_visualizer.visualize(base_pos_w, vel_des_arrow_quat, vel_des_arrow_scale)
         self.current_vel_visualizer.visualize(base_pos_w, vel_arrow_quat, vel_arrow_scale)
-        if self._height_scanner is not None and self.cfg.height_scan_debug_vis:
-            ray_hits_w = self._height_scanner.data.ray_hits_w
-            self.height_scan_visualizer.visualize(translations=ray_hits_w.reshape(-1, 3))
         self._visualize_target_markers()
 
     def _resolve_xy_velocity_to_arrow(self, xy_velocity: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Converts the XY base velocity command to arrow direction rotation."""
         # obtain default scale of the marker
         default_scale = self.goal_vel_visualizer.cfg.markers["arrow"].scale
+
         # arrow-scale
-        arrow_scale = torch.tensor(default_scale, device=self.device).repeat(xy_velocity.shape[0], 1)
+        arrow_scale = torch.tensor(default_scale, device=self.device, dtype=xy_velocity.dtype).repeat(
+            xy_velocity.shape[0], 1
+        )
         arrow_scale[:, 0] *= torch.linalg.norm(xy_velocity, dim=1) * 3.0
+
         # arrow-direction
         heading_angle = torch.atan2(xy_velocity[:, 1], xy_velocity[:, 0])
         zeros = torch.zeros_like(heading_angle)
         arrow_quat = math_utils.quat_from_euler_xyz(zeros, zeros, heading_angle)
+
         # convert everything back from base to world frame
         base_quat_w = self.robot.data.root_quat_w
         arrow_quat = math_utils.quat_mul(base_quat_w, arrow_quat)
@@ -651,12 +591,14 @@ class Go2PendulumEnv(DirectRLEnv):
     def _visualize_target_markers(self) -> None:
         if not self.cfg.tracking_mode or self.target_state is None or self.target_visualizer is None:
             return
+
         if self._marker_locations is None:
             self._marker_up = self._marker_up.to(device=self.device)
             self._marker_locations = torch.zeros((self.num_envs, 3), device=self.device)
             self._marker_offset = torch.zeros((self.num_envs, 3), device=self.device)
             self._marker_offset[:, -1] = 1.0
             self._marker_orientations = torch.zeros((self.num_envs, 4), device=self.device)
+
         env_origins = self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
         target_xy = self.target_state[:, :2]
         target_pos_world = target_xy + env_origins[:, :2]
@@ -675,10 +617,10 @@ class Go2PendulumEnv(DirectRLEnv):
         target_pos_3d = torch.zeros_like(robot_pos_3d)
         target_pos_3d[:, :2] = target_pos_world
         target_pos_3d[:, 2] = env_origins[:, 2]
+
         robot_pos_3d = robot_pos_3d.clone()
         robot_pos_3d[:, 2] = env_origins[:, 2]
-        midpoint = (robot_pos_3d + target_pos_3d) / 2.0
-        self._marker_locations = midpoint
+        self._marker_locations = (robot_pos_3d + target_pos_3d) / 2.0
 
         sphere_locations = torch.zeros_like(self._marker_locations)
         sphere_locations[:, :2] = target_pos_world
@@ -693,9 +635,11 @@ class Go2PendulumEnv(DirectRLEnv):
     def _update_commands(self) -> None:
         if not self.cfg.tracking_mode:
             return
+
         if self.target_state is None:
             self._commands[:] = 0.0
             return
+
         env_origins = self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
         base_pos_xy = self.robot.data.root_pos_w[:, :2] - env_origins[:, :2]
         target_xy = self.target_state[:, :2]
@@ -704,12 +648,15 @@ class Go2PendulumEnv(DirectRLEnv):
         dist_safe = torch.clamp(dist, min=1e-6)
         direction_unit = delta_xy / dist_safe
 
-        desired_speed = torch.full_like(dist, self.cfg.max_linear_speed)
+        cmd_xy_speed_max = math.sqrt(
+            self.cfg.command_lin_vel_x_max**2 + self.cfg.command_lin_vel_y_max**2
+        )
+        desired_speed = torch.full_like(dist, cmd_xy_speed_max)
         close_to_goal = dist.squeeze(-1) <= self.cfg.position_tolerance
         if torch.any(close_to_goal):
             close_dist = dist[close_to_goal]
             close_ratio = torch.clamp(close_dist / self.cfg.position_tolerance, 0.0, 1.0)
-            desired_speed[close_to_goal] = self.cfg.max_linear_speed * (
+            desired_speed[close_to_goal] = cmd_xy_speed_max * (
                 torch.expm1(close_ratio) / math.expm1(1.0)
             )
 
@@ -722,15 +669,20 @@ class Go2PendulumEnv(DirectRLEnv):
         desired_vel_world_xy = direction_unit * desired_speed
         yaw_rate_cmd = torch.clamp(
             yaw_error * self.cfg.yaw_kp,
-            -self.cfg.max_yaw_rate,
-            self.cfg.max_yaw_rate,
+            -self.cfg.command_ang_vel_z_max,
+            self.cfg.command_ang_vel_z_max,
         )
 
         vel_world = torch.zeros(self.num_envs, 3, device=self.device)
         vel_world[:, :2] = desired_vel_world_xy
         vel_body = math_utils.quat_apply_yaw(math_utils.quat_conjugate(self.robot.data.root_quat_w), vel_world)
 
-        self._commands[:, :2] = vel_body[:, :2]
+        self._commands[:, 0] = torch.clamp(
+            vel_body[:, 0], -self.cfg.command_lin_vel_x_max, self.cfg.command_lin_vel_x_max
+        )
+        self._commands[:, 1] = torch.clamp(
+            vel_body[:, 1], -self.cfg.command_lin_vel_y_max, self.cfg.command_lin_vel_y_max
+        )
         self._commands[:, 2] = yaw_rate_cmd
 
     @property
@@ -803,7 +755,8 @@ class Go2PendulumEnv(DirectRLEnv):
         footsteps_in_body_frame = torch.zeros(self.num_envs, 4, 3, device=self.device)
         for i in range(4):
             footsteps_in_body_frame[:, i, :] = math_utils.quat_apply_yaw(
-                math_utils.quat_conjugate(self.robot.data.root_quat_w), cur_footsteps_translated[:, i, :]
+                math_utils.quat_conjugate(self.robot.data.root_quat_w),
+                cur_footsteps_translated[:, i, :],
             )
 
         # nominal positions: [FR, FL, RR, RL]
@@ -845,7 +798,6 @@ class Go2PendulumEnv(DirectRLEnv):
         desired_footsteps_body_frame = torch.cat((desired_xs_nom.unsqueeze(2), desired_ys_nom.unsqueeze(2)), dim=2)
 
         err_raibert_heuristic = torch.abs(desired_footsteps_body_frame - footsteps_in_body_frame[:, :, 0:2])
-
         reward = torch.sum(torch.square(err_raibert_heuristic), dim=(1, 2))
 
         return reward

@@ -11,15 +11,13 @@ from isaaclab.actuators import DCMotorCfg
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
-from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sim import SimulationCfg
-from isaaclab.utils import configclass
-from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
-from isaaclab.terrains import TerrainImporterCfg
-from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
-from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg
+from isaaclab.sim import SimulationCfg
+from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.utils import configclass
 
 GO2_PENDULUM_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_model", "go2_pendulum.usd")
 GO2_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_model", "go2.usd")
@@ -73,66 +71,57 @@ GO2_PENDULUM_CFG = ArticulationCfg(
 class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # env
     decimation = 4
-    episode_length_s = 20.0
+    episode_length_s = 8.0
     # - spaces definition
     action_scale = 0.25
     action_space = 12
-    observation_space = 241
+    observation_space = 48 + 4 + 4
     state_space = 0
     debug_vis = True
-    use_height_scan = True
-    enable_height_scanner = True
-    height_scan_debug_vis = False
-    return_teacher_obs = False
     use_pendulum = True
-    tracking_mode = True
-    rough_terrain = False
+    tracking_mode = False
 
     # gait shaping
-    raibert_heuristic_reward_scale = 0.0
-    feet_clearance_penalty_scale = 0.0
-    tracking_contacts_shaped_force_penalty_scale = 0.0
+    raibert_heuristic_reward_scale = -10.0
+    feet_clearance_reward_scale = -30.0
+    tracking_contacts_shaped_force_reward_scale = 4.0
 
-    # early stopping
+    # torque regularization
+    torque_reward_scale = -0.0001
+
+    # early stopping / termination
     base_contact_grace_s = 0.0
-    termination_penalty = -1000.0
+    termination_penalty = -300.0
     pendulum_contact_force_threshold = 1.0
 
-    # reward scales
-    lin_vel_reward_scale = 0.8
-    yaw_rate_reward_scale = 0.4
-    action_rate_penalty_scale = -0.01
-    feet_air_time_reward_scale = 1.0
-    undesired_contact_penalty_scale = -10.0
-    dof_torques_penalty_scale = -0.0002
-    dof_accel_penalty_scale = -1.25e-7
-    orient_penalty_scale = -10.0
-    lin_vel_z_penalty_scale = -0.2
-    lin_vel_z_penalty_clip = 10.0
-    dof_vel_penalty_scale = -0.001
-    ang_vel_xy_penalty_scale = -0.05
-    pendulum_upright_reward_scale = 1.0
-    pendulum_vel_reward_scale = 2.0
+    # reward scales (rob6323 baseline) 
+    lin_vel_reward_scale = 1.0
+    yaw_rate_reward_scale = 0.5
+    action_rate_reward_scale = -0.1
+    orient_reward_scale = -5.0
+    lin_vel_z_reward_scale = -0.02
+    dof_vel_reward_scale = -0.0001
+    ang_vel_xy_reward_scale = -0.001
+    pendulum_upright_reward_scale = -1.0
+    pendulum_vel_reward_scale = -0.02
     balanced_movement_reward_scale = 4.0
 
     # command generation
     yaw_kp = 1.0
-    max_yaw_rate = 0.5
-    max_linear_speed = 0.7
     goal_randomization_range = 0.1
     goal_randomization_angle = math.pi
     position_tolerance = 0.8
+    command_lin_vel_x_max = 0.0
+    command_lin_vel_y_max = 0.0
+    command_ang_vel_z_max = 0.0
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
     pendulum_angle_min = 0.0 * math.pi / 180.0
-    pendulum_angle_max = 9.0 * math.pi / 180.0
-    pendulum_terminate_angle_rad = 6.0 * math.pi / 180.0
+    pendulum_angle_max = 0.1 * math.pi / 180.0
+    pendulum_terminate_angle_rad = 0.1 * math.pi / 180.0
     pendulum_terminate_duration_s = 4.0
     position_terminate_duration_s = 4.0
-
-    # terrain scaling
-    terrain_scale = 0.5
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
@@ -148,23 +137,14 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     )
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
-        terrain_type="generator",
-        terrain_generator=ROUGH_TERRAINS_CFG,
-        max_init_terrain_level=0,
+        terrain_type="plane",
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",
             static_friction=1.0,
             dynamic_friction=1.0,
-        ),
-        visual_material=sim_utils.MdlFileCfg(
-            mdl_path=(
-                f"{ISAACLAB_NUCLEUS_DIR}/Materials/TilesMarbleSpiderWhiteBrickBondHoned/"
-                "TilesMarbleSpiderWhiteBrickBondHoned.mdl"
-            ),
-            project_uvw=True,
-            texture_scale=(0.25, 0.25),
+            restitution=0.0,
         ),
         debug_vis=False,
     )
@@ -181,14 +161,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/pendulum_ee", history_length=1, update_period=0.005, track_air_time=False
     )
-    height_scanner = RayCasterCfg(
-        prim_path="/World/envs/env_.*/Robot/base",
-        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
-        ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
-        debug_vis=False,
-        mesh_prim_paths=["/World/ground"],
-    )
 
     goal_vel_visualizer_cfg: VisualizationMarkersCfg = GREEN_ARROW_X_MARKER_CFG.replace(
         prim_path="/Visuals/Command/velocity_goal"
@@ -203,9 +175,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Set the scale of the visualization markers to (0.5, 0.5, 0.5)
     goal_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
     current_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
-    goal_vel_visualizer_cfg.markers["arrow"].visual_material = sim_utils.PreviewSurfaceCfg(
-        diffuse_color=(1.0, 0.0, 0.0)
-    )
 
     target_marker_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
         prim_path="/Visuals/TargetMarkers",
@@ -219,61 +188,18 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        if not self.rough_terrain:
-            self.terrain = self.terrain.replace(terrain_type="plane", terrain_generator=None)
+
+        # Keep pendulum toggle behavior available, but disable by default.
         if not self.use_pendulum:
             self.robot_cfg = self.robot_cfg.replace(
                 spawn=self.robot_cfg.spawn.replace(usd_path=GO2_USD_PATH),
             )
-            self.pendulum_upright_reward_scale = 0.0
-            self.pendulum_vel_reward_scale = 0.0
             self.pendulum_contact_sensor = self.pendulum_contact_sensor.replace(
                 prim_path="/World/envs/env_.*/Robot/base"
             )
+
+        # Keep observation dims fixed so policies are compatible across pendulum modes.
+        self.observation_space = 48 + 4 + 2 * len(self.pendulum_joint_names)
+
         # Increase GPU rigid patch buffer to avoid PhysX patch overflow.
         self.sim.physx.gpu_max_rigid_patch_count = 2**18
-        if self.terrain.terrain_generator is not None:
-            terrain_gen = self.terrain.terrain_generator
-            terrain_gen.curriculum = True
-            scale = self.terrain_scale
-            terrain_gen.size = tuple(dim * scale for dim in terrain_gen.size)
-            terrain_gen.border_width *= scale
-            terrain_gen.horizontal_scale *= scale
-            terrain_gen.vertical_scale *= scale
-
-            def _scale_range(value_range: tuple[float, float]) -> tuple[float, float]:
-                return (value_range[0] * scale, value_range[1] * scale)
-
-            sub_terrains = terrain_gen.sub_terrains
-            if "pyramid_stairs" in sub_terrains:
-                sub_terrains["pyramid_stairs"].step_height_range = _scale_range(
-                    sub_terrains["pyramid_stairs"].step_height_range
-                )
-                sub_terrains["pyramid_stairs"].step_width *= scale
-                sub_terrains["pyramid_stairs"].platform_width *= scale
-                sub_terrains["pyramid_stairs"].border_width *= scale
-            if "pyramid_stairs_inv" in sub_terrains:
-                sub_terrains["pyramid_stairs_inv"].step_height_range = _scale_range(
-                    sub_terrains["pyramid_stairs_inv"].step_height_range
-                )
-                sub_terrains["pyramid_stairs_inv"].step_width *= scale
-                sub_terrains["pyramid_stairs_inv"].platform_width *= scale
-                sub_terrains["pyramid_stairs_inv"].border_width *= scale
-            if "boxes" in sub_terrains:
-                sub_terrains["boxes"].grid_width *= scale
-                sub_terrains["boxes"].grid_height_range = _scale_range(sub_terrains["boxes"].grid_height_range)
-                sub_terrains["boxes"].platform_width *= scale
-            if "random_rough" in sub_terrains:
-                sub_terrains["random_rough"].noise_range = _scale_range(sub_terrains["random_rough"].noise_range)
-                sub_terrains["random_rough"].noise_step *= scale
-                sub_terrains["random_rough"].border_width *= scale
-            if "hf_pyramid_slope" in sub_terrains:
-                sub_terrains["hf_pyramid_slope"].platform_width *= scale
-                sub_terrains["hf_pyramid_slope"].border_width *= scale
-            if "hf_pyramid_slope_inv" in sub_terrains:
-                sub_terrains["hf_pyramid_slope_inv"].platform_width *= scale
-                sub_terrains["hf_pyramid_slope_inv"].border_width *= scale
-
-            sub_terrains["boxes"].grid_height_range = (0.025 * scale, 0.1 * scale)
-            sub_terrains["random_rough"].noise_range = (0.01 * scale, 0.06 * scale)
-            sub_terrains["random_rough"].noise_step = 0.01 * scale
