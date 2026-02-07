@@ -82,14 +82,8 @@ class Go2PendulumEnv(DirectRLEnv):
                     raise RuntimeError(f"Expected exactly one joint for '{joint_name}', got {joint_idx}.")
                 self._pendulum_dof_ids.append(joint_idx[0])
             self._pendulum_dof_ids = torch.tensor(self._pendulum_dof_ids, device=self.device, dtype=torch.long)
-
-            pendulum_ee_body_id, _ = self.robot.find_bodies("pendulum_ee")
-            if len(pendulum_ee_body_id) != 1:
-                raise RuntimeError(f"Expected exactly one body for 'pendulum_ee', got {pendulum_ee_body_id}.")
-            self._pendulum_ee_body_id = pendulum_ee_body_id[0]
         else:
             self._pendulum_dof_ids = torch.tensor([], device=self.device, dtype=torch.long)
-            self._pendulum_ee_body_id = None
 
         # Joint position command (deviation from default joint positions).
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
@@ -276,15 +270,11 @@ class Go2PendulumEnv(DirectRLEnv):
             dim=1,
         )
 
-        if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0 and self._pendulum_ee_body_id is not None:
-            pendulum_ee_quat_w = self.robot.data.body_quat_w[:, self._pendulum_ee_body_id]
-            # pendulum_ee body-frame z-axis dotted with world z-axis.
-            # For IsaacLab quaternions in (x, y, z, w), this equals 1 - 2*(x^2 + y^2).
-            pendulum_cos_angle = 1.0 - 2.0 * torch.sum(torch.square(pendulum_ee_quat_w[:, :2]), dim=1)
-            pendulum_cos_angle = torch.clamp(pendulum_cos_angle, -1.0 + 1e-6, 1.0 - 1e-6)
-            pendulum_angle = torch.acos(pendulum_cos_angle)
+        if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
+            pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
+            pendulum_angle = torch.linalg.norm(pendulum_joint_pos, dim=1)
             pendulum_angle_deg = pendulum_angle * (180.0 / math.pi)
-            pendulum_upright_reward = torch.pow(pendulum_angle_deg, 4)
+            pendulum_upright_reward = torch.square(pendulum_angle_deg)
 
             pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
             pendulum_joint_vel_deg = pendulum_joint_vel * (180.0 / math.pi)
