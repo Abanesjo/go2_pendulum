@@ -141,6 +141,7 @@ class Go2PendulumEnv(DirectRLEnv):
         self._base_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._pendulum_angle_failure_steps = None
         self._position_failure_steps = None
+        self._steps_since_reset = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
 
         # add handle for debug visualization (this is set to a valid handle inside set_debug_vis)
         self.set_debug_vis(self.cfg.debug_vis)
@@ -346,6 +347,12 @@ class Go2PendulumEnv(DirectRLEnv):
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
+        steps_since_reset = self._steps_since_reset
+
+        base_contact_grace_steps = max(0, math.ceil(self.cfg.base_contact_grace_s / self.step_dt))
+        termination_grace_steps = max(0, math.ceil(self.cfg.termination_grace_s / self.step_dt))
+        in_termination_grace = steps_since_reset < termination_grace_steps
+        termination_allowed = ~in_termination_grace
 
         net_contact_forces = self._contact_sensor.data.net_forces_w_history
         cstr_termination_contacts = torch.any(
@@ -354,10 +361,9 @@ class Go2PendulumEnv(DirectRLEnv):
         )
 
         # Allow a grace period so brief settling contacts right after reset don't terminate.
-        contact_grace = self.episode_length_buf > math.ceil(self.cfg.base_contact_grace_s / self.step_dt)
-        cstr_termination_contacts = cstr_termination_contacts & contact_grace
+        contact_grace_elapsed = steps_since_reset >= base_contact_grace_steps
+        cstr_termination_contacts = cstr_termination_contacts & contact_grace_elapsed & termination_allowed
 
-        self._base_contact_terminated = cstr_termination_contacts
         terminated = cstr_termination_contacts
 
         if self.cfg.use_pendulum and self._pendulum_contact_sensor is not None:
@@ -366,6 +372,7 @@ class Go2PendulumEnv(DirectRLEnv):
                 torch.norm(pendulum_contact_forces, dim=-1) > self.cfg.pendulum_contact_force_threshold,
                 dim=1,
             )
+            pendulum_contact = pendulum_contact & termination_allowed
             terminated = terminated | pendulum_contact
 
         if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
@@ -375,7 +382,7 @@ class Go2PendulumEnv(DirectRLEnv):
                 self._pendulum_angle_failure_steps = torch.zeros(
                     self.num_envs, device=self.device, dtype=torch.long
                 )
-            pendulum_failing = pendulum_angle_norm > self.cfg.pendulum_terminate_angle_rad
+            pendulum_failing = (pendulum_angle_norm > self.cfg.pendulum_terminate_angle_rad) & termination_allowed
             self._pendulum_angle_failure_steps = torch.where(
                 pendulum_failing,
                 self._pendulum_angle_failure_steps + 1,
@@ -391,7 +398,7 @@ class Go2PendulumEnv(DirectRLEnv):
             position_error = torch.linalg.norm(self.target_state[:, :2] - base_pos_xy, dim=1)
             if self._position_failure_steps is None:
                 self._position_failure_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
-            position_failing = position_error > self.cfg.position_tolerance
+            position_failing = (position_error > self.cfg.position_tolerance) & termination_allowed
             self._position_failure_steps = torch.where(
                 position_failing,
                 self._position_failure_steps + 1,
@@ -400,6 +407,9 @@ class Go2PendulumEnv(DirectRLEnv):
             position_failure_threshold = max(1, math.ceil(self.cfg.position_terminate_duration_s / self.step_dt))
             position_terminated = self._position_failure_steps >= position_failure_threshold
             terminated = terminated | position_terminated
+
+        self._base_contact_terminated = cstr_termination_contacts
+        self._steps_since_reset += 1
 
         return terminated, time_out
 
@@ -420,6 +430,7 @@ class Go2PendulumEnv(DirectRLEnv):
         self._previous_actions[env_ids] = 0.0
 
         # Reset variables.
+        self._steps_since_reset[env_ids] = 0
         self.last_actions[env_ids] = 0
         self.gait_indices[env_ids] = 0
         if self._pendulum_angle_failure_steps is not None:

@@ -90,8 +90,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     torque_reward_scale = -0.0001
 
     # early stopping / termination
+    termination_grace_s = 2.0
     base_contact_grace_s = 0.0
-    termination_penalty = -300.0
+    termination_penalty = -5000.0
     pendulum_contact_force_threshold = 1.0
 
     # reward scales (rob6323 baseline) 
@@ -102,26 +103,27 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     lin_vel_z_reward_scale = -0.02
     dof_vel_reward_scale = -0.0001
     ang_vel_xy_reward_scale = -0.001
-    pendulum_upright_reward_scale = -0.0005
+
+    pendulum_upright_reward_scale = -0.0002
     pendulum_vel_reward_scale = -0.02
     balanced_movement_reward_scale = 0.5
 
     # command generation
     yaw_kp = 1.0
-    goal_randomization_range = 0.1
+    goal_randomization_range = 1.5
     goal_randomization_angle = math.pi
-    position_tolerance = 0.8
-    command_lin_vel_x_max = 1.0
-    command_lin_vel_y_max = 1.0
-    command_ang_vel_z_max = 1.0
+    position_tolerance = 0.3
+    command_lin_vel_x_max = 0.0
+    command_lin_vel_y_max = 0.0
+    command_ang_vel_z_max = 0.0
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
     pendulum_angle_min = 0.0 * math.pi / 180.0
     pendulum_angle_max = 0.1 * math.pi / 180.0
-    pendulum_terminate_angle_rad = 7.0 * math.pi / 180.0
-    pendulum_terminate_duration_s = 8.0
-    position_terminate_duration_s = 4.0
+    pendulum_terminate_angle_rad = 8.0 * math.pi / 180.0
+    pendulum_terminate_duration_s = 0.1
+    position_terminate_duration_s = 8.0
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
