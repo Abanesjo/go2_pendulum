@@ -102,18 +102,18 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     lin_vel_z_reward_scale = -0.02
     dof_vel_reward_scale = -0.0001
     ang_vel_xy_reward_scale = -0.001
-    pendulum_upright_reward_scale = -0.1
-    pendulum_vel_reward_scale = -0.002
-    balanced_movement_reward_scale = 0.05
+    pendulum_upright_reward_scale = -0.0005
+    pendulum_vel_reward_scale = -0.02
+    balanced_movement_reward_scale = 0.5
 
     # command generation
     yaw_kp = 1.0
     goal_randomization_range = 0.1
     goal_randomization_angle = math.pi
     position_tolerance = 0.8
-    command_lin_vel_x_max = 0.0
-    command_lin_vel_y_max = 0.0
-    command_ang_vel_z_max = 0.0
+    command_lin_vel_x_max = 1.0
+    command_lin_vel_y_max = 1.0
+    command_ang_vel_z_max = 1.0
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]

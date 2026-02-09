@@ -274,7 +274,7 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
             pendulum_angle = torch.linalg.norm(pendulum_joint_pos, dim=1)
             pendulum_angle_deg = pendulum_angle * (180.0 / math.pi)
-            pendulum_upright_reward = torch.square(pendulum_angle_deg)
+            pendulum_upright_reward = torch.pow(pendulum_angle_deg, 4)
 
             pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
             pendulum_joint_vel_deg = pendulum_joint_vel * (180.0 / math.pi)
@@ -283,13 +283,10 @@ class Go2PendulumEnv(DirectRLEnv):
 
             base_speed = torch.linalg.norm(self.robot.data.root_lin_vel_b[:, :2], dim=1)
             balanced_movement_reward = torch.exp(-pendulum_angle * base_speed)
-            upright_scaled = pendulum_upright_reward * self.cfg.pendulum_upright_reward_scale
-            balanced_movement_scale = self.cfg.balanced_movement_reward_scale * upright_scaled / 16.0
         else:
             pendulum_upright_reward = torch.zeros(self.num_envs, device=self.device)
             pendulum_velocity_reward = torch.zeros(self.num_envs, device=self.device)
             balanced_movement_reward = torch.zeros(self.num_envs, device=self.device)
-            balanced_movement_scale = torch.zeros(self.num_envs, device=self.device)
 
         # penalize high torques from the actuator model
         rew_torque = torch.sum(torch.square(self.robot.data.applied_torque[:, self._leg_dof_ids]), dim=1)
@@ -324,7 +321,7 @@ class Go2PendulumEnv(DirectRLEnv):
             "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale,
             "pendulum_upright": pendulum_upright_reward * self.cfg.pendulum_upright_reward_scale,
             "pendulum_velocity": pendulum_velocity_reward * self.cfg.pendulum_vel_reward_scale,
-            "balanced_movement": balanced_movement_reward * balanced_movement_scale,
+            "balanced_movement": balanced_movement_reward * self.cfg.balanced_movement_reward_scale,
             "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
             "torque": rew_torque * self.cfg.torque_reward_scale,
             "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale,
