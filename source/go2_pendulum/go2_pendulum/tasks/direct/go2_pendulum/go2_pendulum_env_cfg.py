@@ -12,7 +12,6 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.markers import VisualizationMarkersCfg
-from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import SimulationCfg
@@ -79,10 +78,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     state_space = 0
     debug_vis = True
     use_pendulum = True
-    tracking_mode = False
 
     # gait shaping
-    raibert_heuristic_reward_scale = -10.0
     feet_clearance_reward_scale = -30.0
     tracking_contacts_shaped_force_reward_scale = 4.0
 
@@ -95,35 +92,37 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     termination_penalty = -5000.0
     pendulum_contact_force_threshold = 1.0
 
-    # reward scales (rob6323 baseline) 
-    lin_vel_reward_scale = 1.0
-    yaw_rate_reward_scale = 0.5
+    position_reward_scale = 8.0
+    yaw_alignment_reward_scale = 8.0
     action_rate_reward_scale = -0.1
     orient_reward_scale = -5.0
     lin_vel_z_reward_scale = -0.02
     dof_vel_reward_scale = -0.0001
     ang_vel_xy_reward_scale = -0.001
 
-    pendulum_upright_reward_scale = -0.0002
-    pendulum_vel_reward_scale = -0.02
-    balanced_movement_reward_scale = 0.5
+    pendulum_upright_reward_scale = 16.0
+    pendulum_vel_reward_scale = 4.0
+    balanced_movement_reward_scale = 4.0
+    pendulum_upright_sigma_deg = 1.5
+    pendulum_velocity_sigma_deg_s = 2.0
 
-    # command generation
-    yaw_kp = 1.0
-    goal_randomization_range = 1.5
+    # target randomization+
+    goal_randomization_range = 0.0
     goal_randomization_angle = math.pi
-    position_tolerance = 0.3
-    command_lin_vel_x_max = 0.0
-    command_lin_vel_y_max = 0.0
-    command_ang_vel_z_max = 0.0
+    position_tolerance = 2.0
+
+    # observation noise (applied to x/y/yaw target error terms only)
+    observation_noise_scale = 1.0
+    position_noise = 0.02  # meters
+    orientation_noise = math.radians(1.0)  # radians
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
-    pendulum_angle_min = 0.0 * math.pi / 180.0
-    pendulum_angle_max = 0.1 * math.pi / 180.0
-    pendulum_terminate_angle_rad = 8.0 * math.pi / 180.0
-    pendulum_terminate_duration_s = 0.1
-    position_terminate_duration_s = 8.0
+    pendulum_angle_min = math.radians(0.0)
+    pendulum_angle_max = math.radians(0.1)
+    pendulum_terminate_angle_rad = math.radians(8.0)
+    pendulum_terminate_duration_s = 12.0
+    position_terminate_duration_s = 12.0
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
@@ -163,20 +162,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/pendulum_ee", history_length=1, update_period=0.005, track_air_time=False
     )
-
-    goal_vel_visualizer_cfg: VisualizationMarkersCfg = GREEN_ARROW_X_MARKER_CFG.replace(
-        prim_path="/Visuals/Command/velocity_goal"
-    )
-    """The configuration for the goal velocity visualization marker. Defaults to GREEN_ARROW_X_MARKER_CFG."""
-
-    current_vel_visualizer_cfg: VisualizationMarkersCfg = BLUE_ARROW_X_MARKER_CFG.replace(
-        prim_path="/Visuals/Command/velocity_current"
-    )
-    """The configuration for the current velocity visualization marker. Defaults to BLUE_ARROW_X_MARKER_CFG."""
-
-    # Set the scale of the visualization markers to (0.5, 0.5, 0.5)
-    goal_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
-    current_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
 
     target_marker_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
         prim_path="/Visuals/TargetMarkers",
