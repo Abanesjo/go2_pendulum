@@ -95,14 +95,14 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     position_reward_scale = 0.5
     yaw_alignment_reward_scale = 0.5
     action_rate_reward_scale = -0.1
-    orient_reward_scale = -10.0
+    orient_reward_scale = -1.25
     lin_vel_z_reward_scale = -0.02
     dof_vel_reward_scale = -0.0001
     ang_vel_xy_reward_scale = -0.02
-    undesired_contact_reward_scale = -1.0
+    undesired_contact_reward_scale = -2.0
 
-    pendulum_upright_reward_scale = 16.0
-    pendulum_vel_reward_scale = 6
+    pendulum_upright_reward_scale = 32.0
+    pendulum_vel_reward_scale = 12.0
     balanced_movement_reward_scale = 0.2
     pendulum_upright_sigma_deg = 1.0 #1.5
     pendulum_velocity_sigma_deg_s = 1.0 #10
