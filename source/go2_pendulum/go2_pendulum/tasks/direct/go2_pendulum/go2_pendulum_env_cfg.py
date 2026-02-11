@@ -96,7 +96,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     yaw_alignment_reward_scale = 0.5
     action_rate_reward_scale = -0.05
     orient_reward_scale = -8.0
-    lin_vel_z_reward_scale = -0.02
+    lin_vel_z_reward_scale = -2.0
     dof_vel_reward_scale = -0.001
     ang_vel_xy_reward_scale = -0.04
     undesired_contact_reward_scale = -2.0
