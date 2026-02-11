@@ -115,6 +115,7 @@ class Go2PendulumEnv(DirectRLEnv):
             "ang_vel_xy",
             "feet_clearance",
             "tracking_contacts_shaped_force",
+            "undesired_contacts",
             "termination_penalty",
         ]
         self._episode_sums = {
@@ -132,6 +133,12 @@ class Go2PendulumEnv(DirectRLEnv):
 
         # Get specific body indices.
         self._base_id, _ = self._contact_sensor.find_bodies("base")
+        undesired_contact_ids, _ = self._contact_sensor.find_bodies(".*_thigh")
+        self._undesired_contact_body_ids = (
+            torch.tensor(undesired_contact_ids, device=self.device, dtype=torch.long)
+            if len(undesired_contact_ids) > 0
+            else None
+        )
 
         # Track termination causes for accurate logging.
         self._base_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -346,6 +353,19 @@ class Go2PendulumEnv(DirectRLEnv):
             )
         rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4
 
+        # undesired contacts (e.g. thighs)
+        if self._undesired_contact_body_ids is not None:
+            net_contact_forces = self._contact_sensor.data.net_forces_w_history
+            is_contact = (
+                torch.max(
+                    torch.norm(net_contact_forces[:, :, self._undesired_contact_body_ids], dim=-1), dim=1
+                )[0]
+                > 1.0
+            )
+            rew_undesired_contacts = torch.sum(is_contact, dim=1)
+        else:
+            rew_undesired_contacts = torch.zeros(self.num_envs, device=self.device)
+
         early_terminated = self.reset_terminated & ~self.reset_time_outs
         rew_termination_penalty = early_terminated.float() * self.cfg.termination_penalty
 
@@ -365,6 +385,7 @@ class Go2PendulumEnv(DirectRLEnv):
             "tracking_contacts_shaped_force": (
                 rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale
             ),
+            "undesired_contacts": rew_undesired_contacts * self.cfg.undesired_contact_reward_scale,
             "termination_penalty": rew_termination_penalty,
         }
 
