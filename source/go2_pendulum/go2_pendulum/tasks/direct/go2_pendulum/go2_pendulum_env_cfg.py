@@ -87,7 +87,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     torque_reward_scale = -0.0004
 
     # early stopping / termination
-    termination_grace_s = 0.0
+    termination_grace_s = 1.0
     base_contact_grace_s = 0.0
     base_height_min = 0.05
     termination_penalty = -200.0
