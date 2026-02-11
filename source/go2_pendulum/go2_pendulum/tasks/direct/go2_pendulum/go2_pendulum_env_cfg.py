@@ -81,10 +81,10 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # gait shaping
     feet_clearance_reward_scale = -30.0
-    tracking_contacts_shaped_force_reward_scale = 4.0
+    tracking_contacts_shaped_force_reward_scale = 1.0
 
     # torque regularization
-    torque_reward_scale = -0.0001
+    torque_reward_scale = -0.0004
 
     # early stopping / termination
     termination_grace_s = 8.0
@@ -94,11 +94,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     position_reward_scale = 0.5
     yaw_alignment_reward_scale = 0.5
-    action_rate_reward_scale = -0.1
-    orient_reward_scale = -1.25
+    action_rate_reward_scale = -0.05
+    orient_reward_scale = -8.0
     lin_vel_z_reward_scale = -0.02
-    dof_vel_reward_scale = -0.0001
-    ang_vel_xy_reward_scale = -0.02
+    dof_vel_reward_scale = -0.001
+    ang_vel_xy_reward_scale = -0.04
     undesired_contact_reward_scale = -2.0
 
     pendulum_upright_reward_scale = 16.0
