@@ -87,8 +87,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     torque_reward_scale = -0.0004
 
     # early stopping / termination
-    termination_grace_s = 2.0
+    termination_grace_s = 0.0
     base_contact_grace_s = 0.0
+    base_height_min = 0.05
     termination_penalty = -200.0
     pendulum_contact_force_threshold = 1.0
 
@@ -102,10 +103,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     undesired_contact_reward_scale = -20.0
 
     pendulum_upright_reward_scale = 16.0
-    pendulum_vel_reward_scale = 12.0
+    pendulum_vel_reward_scale = -0.01
     balanced_movement_reward_scale = 0.2
-    pendulum_upright_sigma_deg = 1.0 #1.5
-    pendulum_velocity_sigma_deg_s = 2.0 #10
 
     # target randomization+
     goal_randomization_range = 1.0

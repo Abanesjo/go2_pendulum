@@ -310,16 +310,12 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
             pendulum_norm = torch.linalg.norm(pendulum_joint_pos, dim=1)
             pendulum_angle_deg = torch.rad2deg(pendulum_norm)
-            pendulum_upright_reward = torch.exp(
-                -torch.square(pendulum_angle_deg / self.cfg.pendulum_upright_sigma_deg)
-            )
+            pendulum_upright_reward = torch.exp(-pendulum_angle_deg)
 
             pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
             pendulum_joint_vel_deg = torch.rad2deg(pendulum_joint_vel)
             pendulum_vel_norm_deg = torch.linalg.norm(pendulum_joint_vel_deg, dim=1)
-            pendulum_velocity_reward = torch.exp(
-                -torch.square(pendulum_vel_norm_deg / self.cfg.pendulum_velocity_sigma_deg_s)
-            )
+            pendulum_velocity_reward = pendulum_vel_norm_deg
 
             # Match omniwheel: reward high when pendulum is balanced and/or base speed is low.
             base_speed = torch.linalg.norm(self.robot.data.root_lin_vel_w[:, :2], dim=1)
@@ -417,6 +413,10 @@ class Go2PendulumEnv(DirectRLEnv):
         cstr_termination_contacts = cstr_termination_contacts & contact_grace_elapsed & termination_allowed
 
         terminated = cstr_termination_contacts
+
+        base_height = self.robot.data.root_pos_w[:, 2]
+        cstr_base_height_min = (base_height < self.cfg.base_height_min) & termination_allowed
+        terminated = terminated | cstr_base_height_min
 
         if self.cfg.use_pendulum and self._pendulum_contact_sensor is not None:
             pendulum_contact_forces = self._pendulum_contact_sensor.data.net_forces_w
