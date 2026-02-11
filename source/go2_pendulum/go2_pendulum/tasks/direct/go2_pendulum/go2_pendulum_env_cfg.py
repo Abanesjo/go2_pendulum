@@ -107,7 +107,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_velocity_sigma_deg_s = 5.0 #10
 
     # target randomization+
-    goal_randomization_range = 0.0
+    goal_randomization_range = 1.0
     goal_randomization_angle = math.pi
     position_tolerance = 2.0
 
