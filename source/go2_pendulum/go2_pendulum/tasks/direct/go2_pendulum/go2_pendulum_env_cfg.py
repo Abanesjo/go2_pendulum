@@ -101,11 +101,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     ang_vel_xy_reward_scale = -0.02
     undesired_contact_reward_scale = -2.0
 
-    pendulum_upright_reward_scale = 32.0
+    pendulum_upright_reward_scale = 16.0
     pendulum_vel_reward_scale = 12.0
     balanced_movement_reward_scale = 0.2
-    pendulum_upright_sigma_deg = 1.0 #1.5
-    pendulum_velocity_sigma_deg_s = 1.0 #10
+    pendulum_upright_sigma_deg = 2.0 #1.5
+    pendulum_velocity_sigma_deg_s = 4.0 #10
 
     # target randomization+
     goal_randomization_range = 1.0
