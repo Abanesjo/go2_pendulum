@@ -70,7 +70,7 @@ GO2_PENDULUM_CFG = ArticulationCfg(
 class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # env
     decimation = 4
-    episode_length_s = 12.0
+    episode_length_s = 10.0
     # - spaces definition
     action_scale = 0.25
     action_space = 12
@@ -87,7 +87,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     torque_reward_scale = -0.0004
 
     # early stopping / termination
-    termination_grace_s = 8.0
+    termination_grace_s = 2.0
     base_contact_grace_s = 0.0
     termination_penalty = -5000.0
     pendulum_contact_force_threshold = 1.0
@@ -99,7 +99,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     lin_vel_z_reward_scale = -2.0
     dof_vel_reward_scale = -0.001
     ang_vel_xy_reward_scale = -0.04
-    undesired_contact_reward_scale = -2.0
+    undesired_contact_reward_scale = -20.0
 
     pendulum_upright_reward_scale = 16.0
     pendulum_vel_reward_scale = 12.0
@@ -122,8 +122,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_angle_min = math.radians(0.0)
     pendulum_angle_max = math.radians(0.1)
     pendulum_terminate_angle_rad = math.radians(8.0)
-    pendulum_terminate_duration_s = 1.0
-    position_terminate_duration_s = 2.0
+    pendulum_terminate_duration_s = 12.0
+    position_terminate_duration_s = 12.0
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
