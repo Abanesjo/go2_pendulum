@@ -82,8 +82,13 @@ class Go2PendulumEnv(DirectRLEnv):
                     raise RuntimeError(f"Expected exactly one joint for '{joint_name}', got {joint_idx}.")
                 self._pendulum_dof_ids.append(joint_idx[0])
             self._pendulum_dof_ids = torch.tensor(self._pendulum_dof_ids, device=self.device, dtype=torch.long)
+            pendulum_ee_body_ids, _ = self.robot.find_bodies("pendulum_ee")
+            if len(pendulum_ee_body_ids) != 1:
+                raise RuntimeError(f"Expected exactly one body for 'pendulum_ee', got {pendulum_ee_body_ids}.")
+            self._pendulum_ee_body_id = pendulum_ee_body_ids[0]
         else:
             self._pendulum_dof_ids = torch.tensor([], device=self.device, dtype=torch.long)
+            self._pendulum_ee_body_id = None
 
         # Joint position command (deviation from default joint positions).
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
@@ -99,10 +104,12 @@ class Go2PendulumEnv(DirectRLEnv):
         self._marker_orientations = None
         self._marker_locations = None
         self._marker_up = torch.tensor([0.0, 0.0, 1.0])
+        self._world_up = torch.tensor([0.0, 0.0, 1.0], device=self.device)
 
         # Logging.
         episode_sum_keys = [
             "position_tracking",
+            "progress",
             "yaw_alignment",
             "pendulum_upright",
             "pendulum_velocity",
@@ -110,10 +117,13 @@ class Go2PendulumEnv(DirectRLEnv):
             "rew_action_rate",
             "torque",
             "orient",
+            "base_height",
             "lin_vel_z",
             "dof_vel",
+            "dof_acc",
             "ang_vel_xy",
             "feet_clearance",
+            "feet_air_time",
             "tracking_contacts_shaped_force",
             "undesired_contacts",
             "termination_penalty",
@@ -121,6 +131,13 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_sums = {
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device) for key in episode_sum_keys
         }
+        self._episode_base_height_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        self._episode_base_height_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._episode_pendulum_angle_deg_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        self._episode_pendulum_angle_deg_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._episode_pendulum_speed_deg_s_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        self._episode_pendulum_speed_deg_s_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._prev_position_error = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
 
         self.last_actions = torch.zeros(
             self.num_envs,
@@ -226,7 +243,13 @@ class Go2PendulumEnv(DirectRLEnv):
             target_yaw = torch.zeros(self.num_envs, device=self.device, dtype=leg_joint_pos.dtype)
 
         position_error_xy = target_xy - base_pos_xy
-        yaw_error = math_utils.wrap_to_pi(target_yaw - yaw)
+        if self.cfg.track_goal:
+            goal_heading = torch.atan2(position_error_xy[:, 1], position_error_xy[:, 0])
+            yaw_error = math_utils.wrap_to_pi(goal_heading - yaw)
+            near_goal = torch.linalg.norm(position_error_xy, dim=1) < 1e-6
+            yaw_error = torch.where(near_goal, torch.zeros_like(yaw_error), yaw_error)
+        else:
+            yaw_error = math_utils.wrap_to_pi(target_yaw - yaw)
 
         position_noise = self.cfg.position_noise * self.cfg.observation_noise_scale
         orientation_noise = self.cfg.orientation_noise * self.cfg.observation_noise_scale
@@ -268,12 +291,31 @@ class Go2PendulumEnv(DirectRLEnv):
             base_pos_xy = self.robot.data.root_pos_w[:, :2] - env_origins[:, :2]
             position_error = torch.linalg.norm(self.target_state[:, :2] - base_pos_xy, dim=1)
             _, _, yaw = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)
-            yaw_error = math_utils.wrap_to_pi(self.target_state[:, 2] - yaw)
-            position_tracking_reward = torch.exp(-position_error)
-            yaw_alignment_reward = torch.exp(-torch.abs(yaw_error))
+            if self.cfg.track_goal:
+                goal_dir_xy = self.target_state[:, :2] - base_pos_xy
+                goal_heading = torch.atan2(goal_dir_xy[:, 1], goal_dir_xy[:, 0])
+                yaw_error = math_utils.wrap_to_pi(goal_heading - yaw)
+                yaw_error = torch.where(position_error < 1e-6, torch.zeros_like(yaw_error), yaw_error)
+            else:
+                yaw_error = math_utils.wrap_to_pi(self.target_state[:, 2] - yaw)
+            position_sigma = max(self.cfg.position_reward_sigma, 1e-6)
+            position_tracking_reward = torch.exp(-torch.square(position_error) / (position_sigma * position_sigma))
+            rew_progress = self._prev_position_error - position_error
+            self._prev_position_error = position_error.clone()
+            yaw_sigma = max(self.cfg.yaw_alignment_reward_sigma, 1e-6)
+            yaw_alignment_reward = torch.exp(-torch.square(yaw_error) / (yaw_sigma * yaw_sigma))
         else:
+            position_error = torch.zeros(self.num_envs, device=self.device)
             position_tracking_reward = torch.zeros(self.num_envs, device=self.device)
+            rew_progress = torch.zeros(self.num_envs, device=self.device)
             yaw_alignment_reward = torch.zeros(self.num_envs, device=self.device)
+
+        base_height = self.robot.data.root_pos_w[:, 2] - env_origins[:, 2]
+        base_height_error = self.cfg.base_height_target - base_height
+        sigma = max(self.cfg.base_height_reward_sigma, 1e-6)
+        base_height_reward = torch.exp(-torch.square(base_height_error) / (sigma * sigma))
+        self._episode_base_height_sum += base_height
+        self._episode_base_height_count += 1
 
         rew_action_rate = torch.sum(
             torch.square(self._actions - self.last_actions[:, :, 0]),
@@ -290,6 +332,7 @@ class Go2PendulumEnv(DirectRLEnv):
             torch.square(self.robot.data.projected_gravity_b[:, :2]),
             dim=1,
         )
+        rew_orient = torch.exp(-rew_orient)
 
         # penalize vertical velocity (z-component of base linear velocity)
         rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[:, 2])
@@ -300,6 +343,12 @@ class Go2PendulumEnv(DirectRLEnv):
             dim=1,
         )
 
+        # penalize high joint accelerations
+        rew_dof_acc = torch.sum(
+            torch.square(self.robot.data.joint_acc[:, self._leg_dof_ids]),
+            dim=1,
+        )
+
         # penalize angular velocity in xy plane
         rew_ang_vel_xy = torch.sum(
             torch.square(self.robot.data.root_ang_vel_b[:, :2]),
@@ -307,23 +356,37 @@ class Go2PendulumEnv(DirectRLEnv):
         )
 
         if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
-            pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
-            pendulum_norm = torch.linalg.norm(pendulum_joint_pos, dim=1)
-            pendulum_angle_deg = torch.rad2deg(pendulum_norm)
-            pendulum_upright_reward = torch.exp(-pendulum_angle_deg)
+            pendulum_ee_quat_w = self.robot.data.body_quat_w[:, self._pendulum_ee_body_id]
+            pendulum_ee_z_w = math_utils.quat_apply(
+                pendulum_ee_quat_w, self._world_up.unsqueeze(0).expand(self.num_envs, -1)
+            )
+            # Same spirit as base orient reward: penalize tilt of the frame z-axis in xy without angle conversions.
+            pendulum_upright_error = torch.sum(torch.square(pendulum_ee_z_w[:, :2]), dim=1)
+            pendulum_upright_sigma = max(self.cfg.pendulum_upright_reward_sigma, 1e-6)
+            pendulum_upright_reward = torch.exp(
+                -torch.square(pendulum_upright_error) / (pendulum_upright_sigma * pendulum_upright_sigma)
+            )
 
             pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
-            pendulum_joint_vel_deg = torch.rad2deg(pendulum_joint_vel)
-            pendulum_vel_norm_deg = torch.linalg.norm(pendulum_joint_vel_deg, dim=1)
-            pendulum_velocity_reward = pendulum_vel_norm_deg
+            pendulum_vel_norm = torch.linalg.norm(pendulum_joint_vel, dim=1)
+            pendulum_velocity_reward = torch.sum(torch.square(pendulum_joint_vel), dim=1)
+            pendulum_angle_deg = torch.rad2deg(torch.linalg.norm(self.robot.data.joint_pos[:, self._pendulum_dof_ids], dim=1))
+            pendulum_speed_deg_s = torch.rad2deg(pendulum_vel_norm)
 
             # Match omniwheel: reward high when pendulum is balanced and/or base speed is low.
             base_speed = torch.linalg.norm(self.robot.data.root_lin_vel_w[:, :2], dim=1)
-            balanced_movement_reward = torch.exp(-pendulum_norm * base_speed)
+            balanced_movement_reward = torch.exp(-pendulum_upright_error * base_speed)
         else:
             pendulum_upright_reward = torch.zeros(self.num_envs, device=self.device)
             pendulum_velocity_reward = torch.zeros(self.num_envs, device=self.device)
             balanced_movement_reward = torch.zeros(self.num_envs, device=self.device)
+            pendulum_angle_deg = torch.zeros(self.num_envs, device=self.device)
+            pendulum_speed_deg_s = torch.zeros(self.num_envs, device=self.device)
+
+        self._episode_pendulum_angle_deg_sum += pendulum_angle_deg
+        self._episode_pendulum_angle_deg_count += 1
+        self._episode_pendulum_speed_deg_s_sum += pendulum_speed_deg_s
+        self._episode_pendulum_speed_deg_s_count += 1
 
         # penalize high torques from the actuator model
         rew_torque = torch.sum(torch.square(self.robot.data.applied_torque[:, self._leg_dof_ids]), dim=1)
@@ -349,6 +412,11 @@ class Go2PendulumEnv(DirectRLEnv):
             )
         rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4
 
+        # feet air time (same structure as go2_isaaclab, gated by active position command)
+        first_contact = self._contact_sensor.compute_first_contact(self.step_dt)[:, self._feet_ids_sensor]
+        last_air_time = self._contact_sensor.data.last_air_time[:, self._feet_ids_sensor]
+        rew_feet_air_time = torch.sum((last_air_time - 0.5) * first_contact, dim=1) * (position_error > 0.1).float()
+
         # undesired contacts (e.g. thighs)
         if self._undesired_contact_body_ids is not None:
             net_contact_forces = self._contact_sensor.data.net_forces_w_history
@@ -367,6 +435,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
         rewards = {
             "position_tracking": position_tracking_reward * self.cfg.position_reward_scale,
+            "progress": rew_progress * self.cfg.progress_reward_scale,
             "yaw_alignment": yaw_alignment_reward * self.cfg.yaw_alignment_reward_scale,
             "pendulum_upright": pendulum_upright_reward * self.cfg.pendulum_upright_reward_scale,
             "pendulum_velocity": pendulum_velocity_reward * self.cfg.pendulum_vel_reward_scale,
@@ -374,10 +443,13 @@ class Go2PendulumEnv(DirectRLEnv):
             "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
             "torque": rew_torque * self.cfg.torque_reward_scale,
             "orient": rew_orient * self.cfg.orient_reward_scale,
+            "base_height": base_height_reward * self.cfg.base_height_reward_scale,
             "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
             "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,
+            "dof_acc": rew_dof_acc * self.cfg.dof_acc_reward_scale,
             "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,
             "feet_clearance": rew_feet_clearance * self.cfg.feet_clearance_reward_scale,
+            "feet_air_time": rew_feet_air_time * self.cfg.feet_air_time_reward_scale,
             "tracking_contacts_shaped_force": (
                 rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale
             ),
@@ -415,6 +487,7 @@ class Go2PendulumEnv(DirectRLEnv):
         terminated = cstr_termination_contacts
 
         base_height = self.robot.data.root_pos_w[:, 2]
+        # print(base_height)
         cstr_base_height_min = (base_height < self.cfg.base_height_min) & termination_allowed
         terminated = terminated | cstr_base_height_min
 
@@ -495,12 +568,20 @@ class Go2PendulumEnv(DirectRLEnv):
             self.target_state = torch.zeros(self.num_envs, 3, device=self.device)
 
         num_reset_envs = env_ids.shape[0]
-        goal_range = self.cfg.goal_randomization_range
-        goal_noise_x = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
-        goal_noise_y = sample_uniform(-goal_range, goal_range, (num_reset_envs,), self.device)
+        dist_min = min(self.cfg.goal_randomization_dist_min, self.cfg.goal_randomization_dist_max)
+        dist_max = max(self.cfg.goal_randomization_dist_min, self.cfg.goal_randomization_dist_max)
+        bearing_min = min(self.cfg.goal_randomization_angle_min, self.cfg.goal_randomization_angle_max)
+        bearing_max = max(self.cfg.goal_randomization_angle_min, self.cfg.goal_randomization_angle_max)
+        yaw_min = min(self.cfg.goal_yaw_randomization_min, self.cfg.goal_yaw_randomization_max)
+        yaw_max = max(self.cfg.goal_yaw_randomization_min, self.cfg.goal_yaw_randomization_max)
+
+        goal_distance = sample_uniform(dist_min, dist_max, (num_reset_envs,), self.device)
+        goal_bearing = sample_uniform(bearing_min, bearing_max, (num_reset_envs,), self.device)
+        goal_noise_x = goal_distance * torch.cos(goal_bearing)
+        goal_noise_y = goal_distance * torch.sin(goal_bearing)
         goal_yaw = sample_uniform(
-            -self.cfg.goal_randomization_angle,
-            self.cfg.goal_randomization_angle,
+            yaw_min,
+            yaw_max,
             (num_reset_envs,),
             self.device,
         )
@@ -529,6 +610,11 @@ class Go2PendulumEnv(DirectRLEnv):
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
+        # Initialize progress baseline so the first step in an episode has well-defined progress.
+        initial_base_pos_xy = default_root_state[:, :2] - self._terrain.env_origins[env_ids, :2]
+        initial_position_error = torch.linalg.norm(self.target_state[env_ids, :2] - initial_base_pos_xy, dim=1)
+        self._prev_position_error[env_ids] = initial_position_error
+
         self._visualize_target_markers()
 
         # Logging
@@ -545,6 +631,21 @@ class Go2PendulumEnv(DirectRLEnv):
         base_contact_resets = self._base_contact_terminated[env_ids] & self.reset_terminated[env_ids]
         extras["Episode_Termination/base_contact"] = torch.count_nonzero(base_contact_resets).item()
         extras["Episode_Termination/time_out"] = torch.count_nonzero(self.reset_time_outs[env_ids]).item()
+        steps = torch.clamp(self._episode_base_height_count[env_ids], min=1).to(dtype=torch.float)
+        mean_base_height = torch.mean(self._episode_base_height_sum[env_ids] / steps)
+        extras["Episode_Metric/mean_base_height"] = mean_base_height.item()
+        self._episode_base_height_sum[env_ids] = 0.0
+        self._episode_base_height_count[env_ids] = 0
+        pendulum_steps = torch.clamp(self._episode_pendulum_angle_deg_count[env_ids], min=1).to(dtype=torch.float)
+        mean_pendulum_angle_deg = torch.mean(self._episode_pendulum_angle_deg_sum[env_ids] / pendulum_steps)
+        extras["Episode_Metric/mean_pendulum_angle_deg"] = mean_pendulum_angle_deg.item()
+        self._episode_pendulum_angle_deg_sum[env_ids] = 0.0
+        self._episode_pendulum_angle_deg_count[env_ids] = 0
+        pendulum_speed_steps = torch.clamp(self._episode_pendulum_speed_deg_s_count[env_ids], min=1).to(dtype=torch.float)
+        mean_pendulum_speed_deg_s = torch.mean(self._episode_pendulum_speed_deg_s_sum[env_ids] / pendulum_speed_steps)
+        extras["Episode_Metric/mean_pendulum_speed_deg_s"] = mean_pendulum_speed_deg_s.item()
+        self._episode_pendulum_speed_deg_s_sum[env_ids] = 0.0
+        self._episode_pendulum_speed_deg_s_count[env_ids] = 0
         self.extras["log"].update(extras)
 
     def _set_debug_vis_impl(self, debug_vis: bool):
