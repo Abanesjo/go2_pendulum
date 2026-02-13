@@ -100,7 +100,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # 20 reward -> 0.4
     position_reward_scale = 0.4
-    position_reward_sigma = 0.35
+    position_reward_sigma = 0.6
     progress_reward_scale = 100.0
 
     yaw_alignment_reward_scale = 0.3
@@ -117,18 +117,18 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     base_height_reward_scale = 0.1
 
     pendulum_upright_reward_scale = 0.4
-    pendulum_upright_reward_sigma = 0.08
+    pendulum_upright_reward_sigma = math.radians(10)
 
     pendulum_vel_reward_scale = -2.0
     pendulum_vel_reward_sigma = 0.05  # unused with squared-velocity penalty
     
-    balanced_movement_reward_scale = 0.01
+    balanced_movement_reward_scale = 0.2
     
     
 
     # target randomization
     goal_randomization_dist_min = 0.0
-    goal_randomization_dist_max = 0.0
+    goal_randomization_dist_max = 0.6
     goal_randomization_angle_min = math.radians(0)
     goal_randomization_angle_max = math.radians(360)
     goal_yaw_randomization_min = math.radians(0)
@@ -143,8 +143,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
-    pendulum_angle_min = math.radians(9.0)
-    pendulum_angle_max = math.radians(9.9)
+    pendulum_angle_min = math.radians(0.0)
+    pendulum_angle_max = math.radians(0.0)
     pendulum_terminate_angle_rad = math.radians(9.0)
     pendulum_terminate_duration_s = 0.1
 

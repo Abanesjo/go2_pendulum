@@ -308,7 +308,7 @@ class Go2PendulumEnv(DirectRLEnv):
             else:
                 yaw_error = math_utils.wrap_to_pi(self.target_state[:, 2] - yaw)
             position_sigma = max(self.cfg.position_reward_sigma, 1e-6)
-            position_tracking_reward = torch.exp(-torch.square(position_error) / (position_sigma * position_sigma))
+            position_tracking_reward = 1.0 - (position_error / position_sigma)
             rew_progress = self._prev_position_error - position_error
             self._prev_position_error = position_error.clone()
             yaw_sigma = max(self.cfg.yaw_alignment_reward_sigma, 1e-6)
@@ -372,9 +372,7 @@ class Go2PendulumEnv(DirectRLEnv):
             # Same spirit as base orient reward: penalize tilt of the frame z-axis in xy without angle conversions.
             pendulum_upright_error = torch.sum(torch.square(pendulum_ee_z_w[:, :2]), dim=1)
             pendulum_upright_sigma = max(self.cfg.pendulum_upright_reward_sigma, 1e-6)
-            pendulum_upright_reward = torch.exp(
-                -torch.square(pendulum_upright_error) / (pendulum_upright_sigma * pendulum_upright_sigma)
-            )
+            pendulum_upright_reward = 1.0 - (pendulum_upright_error / pendulum_upright_sigma)
 
             pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
             pendulum_vel_norm = torch.linalg.norm(pendulum_joint_vel, dim=1)
