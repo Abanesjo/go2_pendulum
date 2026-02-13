@@ -242,10 +242,19 @@ class Go2PendulumEnv(DirectRLEnv):
             target_xy = torch.zeros((self.num_envs, 2), device=self.device, dtype=leg_joint_pos.dtype)
             target_yaw = torch.zeros(self.num_envs, device=self.device, dtype=leg_joint_pos.dtype)
 
-        position_error_xy = target_xy - base_pos_xy
+        position_error_xy_world = target_xy - base_pos_xy
+        cos_yaw = torch.cos(yaw)
+        sin_yaw = torch.sin(yaw)
+        position_error_xy = torch.stack(
+            (
+                cos_yaw * position_error_xy_world[:, 0] + sin_yaw * position_error_xy_world[:, 1],
+                -sin_yaw * position_error_xy_world[:, 0] + cos_yaw * position_error_xy_world[:, 1],
+            ),
+            dim=-1,
+        )
         if self.cfg.track_goal:
             goal_heading = torch.atan2(position_error_xy[:, 1], position_error_xy[:, 0])
-            yaw_error = math_utils.wrap_to_pi(goal_heading - yaw)
+            yaw_error = math_utils.wrap_to_pi(goal_heading)
             near_goal = torch.linalg.norm(position_error_xy, dim=1) < 1e-6
             yaw_error = torch.where(near_goal, torch.zeros_like(yaw_error), yaw_error)
         else:

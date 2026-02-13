@@ -70,7 +70,7 @@ GO2_PENDULUM_CFG = ArticulationCfg(
 class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # env
     decimation = 4
-    episode_length_s = 12.0
+    episode_length_s = 12.
     # - spaces definition
     action_scale = 0.25
     action_space = 12
@@ -88,23 +88,23 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     torque_reward_scale = -0.0002
 
     # early stopping / termination
-    termination_grace_s = 0.1
+    termination_grace_s = 1.0
     base_contact_grace_s = 0.0
     base_height_min = 0.3
 
     base_height_target = 0.36
     base_height_reward_sigma = 0.06
     
-    termination_penalty = -100.0
+    termination_penalty = -500.0
     pendulum_contact_force_threshold = 1.0
 
     # 20 reward -> 0.4
     position_reward_scale = 0.4
-    position_reward_sigma = 0.05
+    position_reward_sigma = 0.35
     progress_reward_scale = 100.0
 
     yaw_alignment_reward_scale = 0.3
-    yaw_alignment_reward_sigma = 0.25
+    yaw_alignment_reward_sigma = 0.2
 
     action_rate_reward_scale = -0.01
     feet_air_time_reward_scale = 0.01
@@ -116,7 +116,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     undesired_contact_reward_scale = -1.0
     base_height_reward_scale = 0.1
 
-    pendulum_upright_reward_scale = 4.0
+    pendulum_upright_reward_scale = 0.4
     pendulum_upright_reward_sigma = 0.08
 
     pendulum_vel_reward_scale = -2.0
@@ -127,12 +127,12 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     
 
     # target randomization
-    goal_randomization_dist_min = 0.8
-    goal_randomization_dist_max = 1.0
+    goal_randomization_dist_min = 0.0
+    goal_randomization_dist_max = 0.0
     goal_randomization_angle_min = math.radians(0)
     goal_randomization_angle_max = math.radians(360)
     goal_yaw_randomization_min = math.radians(0)
-    goal_yaw_randomization_max = math.radians(360)
+    goal_yaw_randomization_max = math.radians(0)
     position_tolerance = 0.1
     position_terminate_duration_s = 15.0
 
@@ -143,8 +143,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # pendulum setup
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
-    pendulum_angle_min = math.radians(0.0)
-    pendulum_angle_max = math.radians(3.0)
+    pendulum_angle_min = math.radians(9.0)
+    pendulum_angle_max = math.radians(9.9)
     pendulum_terminate_angle_rad = math.radians(9.0)
     pendulum_terminate_duration_s = 0.1
 
