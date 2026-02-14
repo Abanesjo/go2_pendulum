@@ -92,6 +92,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
         # Joint position command (deviation from default joint positions).
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
+        self._actions_tanh = torch.zeros_like(self._actions)
         self._previous_actions = torch.zeros(
             self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device
         )
@@ -159,6 +160,10 @@ class Go2PendulumEnv(DirectRLEnv):
 
         # Track termination causes for accurate logging.
         self._base_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self._base_height_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self._pendulum_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self._pendulum_angle_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self._position_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._pendulum_angle_failure_steps = None
         self._position_failure_steps = None
         self._steps_since_reset = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
@@ -200,7 +205,8 @@ class Go2PendulumEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self._actions = actions.clone()
-        self._processed_actions = self.cfg.action_scale * self._actions
+        self._actions_tanh = torch.tanh(self._actions)
+        self._processed_actions = self.cfg.action_scale * self._actions_tanh
 
         self.desired_joint_pos = (
             self.robot.data.default_joint_pos[:, self._leg_dof_ids] + self._processed_actions
@@ -289,7 +295,7 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_vel,
         ]
 
-        policy_tensors.extend([self._actions, self.clock_inputs])
+        policy_tensors.extend([self._actions_tanh, self.clock_inputs])
 
         observations = {"policy": torch.cat(policy_tensors, dim=-1)}
         return observations
@@ -498,6 +504,7 @@ class Go2PendulumEnv(DirectRLEnv):
         cstr_base_height_min = (base_height < self.cfg.base_height_min) & termination_allowed
         terminated = terminated | cstr_base_height_min
 
+        pendulum_contact = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         if self.cfg.use_pendulum and self._pendulum_contact_sensor is not None:
             pendulum_contact_forces = self._pendulum_contact_sensor.data.net_forces_w
             pendulum_contact = torch.any(
@@ -507,6 +514,7 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_contact = pendulum_contact & termination_allowed
             terminated = terminated | pendulum_contact
 
+        pendulum_angle_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
             pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
             pendulum_angle_norm = torch.linalg.norm(pendulum_joint_pos, dim=1)
@@ -524,6 +532,7 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_angle_terminated = self._pendulum_angle_failure_steps >= failure_steps_threshold
             terminated = terminated | pendulum_angle_terminated
 
+        position_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         if self.target_state is not None:
             env_origins = self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
             base_pos_xy = self.robot.data.root_pos_w[:, :2] - env_origins[:, :2]
@@ -541,6 +550,10 @@ class Go2PendulumEnv(DirectRLEnv):
             terminated = terminated | position_terminated
 
         self._base_contact_terminated = cstr_termination_contacts
+        self._base_height_terminated = cstr_base_height_min
+        self._pendulum_contact_terminated = pendulum_contact
+        self._pendulum_angle_terminated = pendulum_angle_terminated
+        self._position_terminated = position_terminated
         self._steps_since_reset += 1
 
         return terminated, time_out
@@ -559,6 +572,7 @@ class Go2PendulumEnv(DirectRLEnv):
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
 
         self._actions[env_ids] = 0.0
+        self._actions_tanh[env_ids] = 0.0
         self._previous_actions[env_ids] = 0.0
 
         # Reset variables.
@@ -636,7 +650,25 @@ class Go2PendulumEnv(DirectRLEnv):
 
         extras = dict()
         base_contact_resets = self._base_contact_terminated[env_ids] & self.reset_terminated[env_ids]
+        base_height_resets = self._base_height_terminated[env_ids] & self.reset_terminated[env_ids]
+        pendulum_contact_resets = self._pendulum_contact_terminated[env_ids] & self.reset_terminated[env_ids]
+        pendulum_angle_resets = self._pendulum_angle_terminated[env_ids] & self.reset_terminated[env_ids]
+        position_resets = self._position_terminated[env_ids] & self.reset_terminated[env_ids]
+        any_labeled_reset = (
+            base_contact_resets
+            | base_height_resets
+            | pendulum_contact_resets
+            | pendulum_angle_resets
+            | position_resets
+        )
         extras["Episode_Termination/base_contact"] = torch.count_nonzero(base_contact_resets).item()
+        extras["Episode_Termination/base_height"] = torch.count_nonzero(base_height_resets).item()
+        extras["Episode_Termination/pendulum_contact"] = torch.count_nonzero(pendulum_contact_resets).item()
+        extras["Episode_Termination/pendulum_angle"] = torch.count_nonzero(pendulum_angle_resets).item()
+        extras["Episode_Termination/position_error"] = torch.count_nonzero(position_resets).item()
+        extras["Episode_Termination/other"] = torch.count_nonzero(
+            self.reset_terminated[env_ids] & ~any_labeled_reset
+        ).item()
         extras["Episode_Termination/time_out"] = torch.count_nonzero(self.reset_time_outs[env_ids]).item()
         steps = torch.clamp(self._episode_base_height_count[env_ids], min=1).to(dtype=torch.float)
         mean_base_height = torch.mean(self._episode_base_height_sum[env_ids] / steps)
