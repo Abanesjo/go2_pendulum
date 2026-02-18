@@ -98,7 +98,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Termination conditions.
     termination_grace_s = 0.1
     base_contact_grace_s = 0.5
-    base_height_min = 0.3
+    base_height_min = -10.0 #0.3
     base_height_terminate_duration_s = 0.1
 
     pendulum_contact_force_threshold = 1.0
