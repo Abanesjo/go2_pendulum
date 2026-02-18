@@ -70,7 +70,7 @@ GO2_PENDULUM_CFG = ArticulationCfg(
 class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Core environment interface.
     decimation = 4
-    episode_length_s = 12
+    episode_length_s = 20
     action_space = 12
     action_scale = 0.25
     enable_action_clipping = False
@@ -83,30 +83,30 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # Initial conditions (reset sampling).
     # - Goal target sampling in the environment frame.
-    goal_randomization_dist_min = 0.0
-    goal_randomization_dist_max = 0.5
+    goal_randomization_dist_min = 0.5
+    goal_randomization_dist_max = 1.0
     goal_randomization_angle_min = math.radians(0)
     goal_randomization_angle_max = math.radians(360)
-    goal_yaw_randomization_min = math.radians(0)
-    goal_yaw_randomization_max = math.radians(0)
+    goal_yaw_randomization_min = math.radians(-30)
+    goal_yaw_randomization_max = math.radians(30)
 
     # - Pendulum reset angle sampling.
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
     pendulum_angle_min = math.radians(0.0)
-    pendulum_angle_max = math.radians(0.5)
+    pendulum_angle_max = math.radians(9.0)
 
     # Termination conditions.
     termination_grace_s = 0.1
     base_contact_grace_s = 0.5
-    base_height_min = 0.28
+    base_height_min = 0.3
     base_height_terminate_duration_s = 0.1
 
     pendulum_contact_force_threshold = 1.0
     pendulum_terminate_angle_rad = math.radians(9.0)
-    pendulum_terminate_duration_s = 0.1
+    pendulum_terminate_duration_s = 3.0
 
     position_tolerance = 0.1
-    position_terminate_duration_s = 15.0
+    position_terminate_duration_s = 12.0
     termination_penalty = -500.0
 
     # Position tracking and heading alignment.
@@ -119,9 +119,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Pendulum/balance rewards.
     pendulum_upright_reward_scale = 0.4
     pendulum_upright_reward_sigma = math.radians(12)
-    pendulum_vel_reward_scale = -2.0
+    pendulum_vel_reward_scale = -0.5
     pendulum_vel_reward_sigma = 0.05  # unused with squared-velocity penalty
-    balanced_movement_reward_scale = 0.2
+    balanced_movement_reward_scale = 0.1
 
     # Quadruped motion regularization and gait shaping.
     feet_clearance_reward_scale = -20.0
@@ -129,7 +129,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     feet_air_time_reward_scale = 0.1
     action_rate_reward_scale = -0.0001
     action_soft_limit = 2.0
-    action_over_limit_reward_scale = 0.0
+    action_over_limit_reward_scale = -0.01
     torque_reward_scale = -0.0001
     orient_reward_scale = 0.1
     lin_vel_z_reward_scale = -2.0
@@ -142,10 +142,16 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     base_height_reward_sigma = 0.06
     base_height_reward_scale = 0.1
 
-    # observation noise (applied to x/y/yaw target error terms only)
+    # Observation noise.
     observation_noise_scale = 1.0
-    position_noise = 0.02  # meters
-    orientation_noise = math.radians(1.0)  # radians
+    position_noise = 0.02  # meters, applied to x/y position-error observation
+    body_lin_vel_noise = 0.1  # m/s, applied to root_lin_vel_b
+
+    orientation_noise = math.radians(1.0)  # radians, applied to yaw-error observation
+    body_ang_vel_noise = math.radians(5.0)  # rad/s, applied to root_ang_vel_b
+   
+    pendulum_joint_pos_noise = math.radians(1.0)  # rad, applied to pendulum joint-angle observation
+    pendulum_joint_vel_noise = math.radians(5.0)  # rad/s, applied to pendulum joint-velocity observation
 
     # Simulation and scene.
     sim: SimulationCfg = SimulationCfg(

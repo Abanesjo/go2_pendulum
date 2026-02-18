@@ -273,8 +273,30 @@ class Go2PendulumEnv(DirectRLEnv):
         else:
             yaw_error = math_utils.wrap_to_pi(target_yaw - yaw)
 
+        body_lin_vel_b = self.robot.data.root_lin_vel_b.clone()
+        body_ang_vel_b = self.robot.data.root_ang_vel_b.clone()
+
+        body_lin_vel_noise = self.cfg.body_lin_vel_noise * self.cfg.observation_noise_scale
+        body_ang_vel_noise = self.cfg.body_ang_vel_noise * self.cfg.observation_noise_scale
         position_noise = self.cfg.position_noise * self.cfg.observation_noise_scale
         orientation_noise = self.cfg.orientation_noise * self.cfg.observation_noise_scale
+        pendulum_joint_pos_noise = self.cfg.pendulum_joint_pos_noise * self.cfg.observation_noise_scale
+        pendulum_joint_vel_noise = self.cfg.pendulum_joint_vel_noise * self.cfg.observation_noise_scale
+
+        if body_lin_vel_noise > 0.0:
+            body_lin_vel_b = body_lin_vel_b + sample_uniform(
+                -body_lin_vel_noise,
+                body_lin_vel_noise,
+                body_lin_vel_b.shape,
+                body_lin_vel_b.device,
+            )
+        if body_ang_vel_noise > 0.0:
+            body_ang_vel_b = body_ang_vel_b + sample_uniform(
+                -body_ang_vel_noise,
+                body_ang_vel_noise,
+                body_ang_vel_b.shape,
+                body_ang_vel_b.device,
+            )
         if position_noise > 0.0:
             position_error_xy = position_error_xy + sample_uniform(
                 -position_noise,
@@ -289,11 +311,26 @@ class Go2PendulumEnv(DirectRLEnv):
                 yaw_error.shape,
                 yaw_error.device,
             )
+        if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
+            if pendulum_joint_pos_noise > 0.0:
+                pendulum_joint_pos = pendulum_joint_pos + sample_uniform(
+                    -pendulum_joint_pos_noise,
+                    pendulum_joint_pos_noise,
+                    pendulum_joint_pos.shape,
+                    pendulum_joint_pos.device,
+                )
+            if pendulum_joint_vel_noise > 0.0:
+                pendulum_joint_vel = pendulum_joint_vel + sample_uniform(
+                    -pendulum_joint_vel_noise,
+                    pendulum_joint_vel_noise,
+                    pendulum_joint_vel.shape,
+                    pendulum_joint_vel.device,
+                )
         state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
 
         policy_tensors = [
-            self.robot.data.root_lin_vel_b,
-            self.robot.data.root_ang_vel_b,
+            body_lin_vel_b,
+            body_ang_vel_b,
             self.robot.data.projected_gravity_b,
             state_error,
             leg_joint_pos,
