@@ -92,7 +92,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     track_goal = False
 
     # Domain randomization.
-    enable_domain_randomization = False
+    enable_domain_randomization = True
     dr_seed_offset = 0
 
     # Material randomization (robot only).
@@ -195,7 +195,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     position_reward_scale = 0.8
     position_reward_sigma = 0.6
     progress_reward_scale = 100.0
-    yaw_alignment_reward_scale = 0.3
+    yaw_alignment_reward_scale = 0.6
     yaw_alignment_reward_sigma = 0.2
 
     # Pendulum/balance rewards.
