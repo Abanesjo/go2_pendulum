@@ -16,6 +16,7 @@ from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.sensors import ContactSensor
+from isaaclab.utils import DelayBuffer
 from isaaclab.utils.math import sample_uniform
 
 from .go2_pendulum_env_cfg import Go2PendulumEnvCfg
@@ -86,11 +87,16 @@ class Go2PendulumEnv(DirectRLEnv):
             )
         if self.cfg.action_bound_margin <= 0.0:
             raise ValueError(f"action_bound_margin must be > 0. Got {self.cfg.action_bound_margin}.")
+        self._validate_domain_randomization_cfg()
         control_dt = self.cfg.sim.dt * self.cfg.decimation
         self._action_lpf_alpha = (
             math.exp(-2.0 * math.pi * self.cfg.action_lpf_cutoff_hz * control_dt) if self.cfg.enable_action_lpf else 0.0
         )
         self._max_action_delay_steps = self.cfg.action_delay_steps_max if self.cfg.enable_action_delay else 0
+        seed_cfg = getattr(self.cfg, "seed", None)
+        seed = 0 if seed_cfg is None else int(seed_cfg)
+        self._dr_rng = torch.Generator(device="cpu")
+        self._dr_rng.manual_seed(seed + int(self.cfg.dr_seed_offset))
 
         self._pendulum_dof_count = len(self.cfg.pendulum_joint_names)
         if self.cfg.use_pendulum:
@@ -226,6 +232,7 @@ class Go2PendulumEnv(DirectRLEnv):
             if len(undesired_contact_ids) > 0
             else None
         )
+        self._init_domain_randomization_state()
 
         # Track termination causes for accurate logging.
         self._base_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -273,7 +280,436 @@ class Go2PendulumEnv(DirectRLEnv):
         # create target visualizer after scene is set up
         self.target_visualizer = VisualizationMarkers(self.cfg.target_marker_cfg)
 
+    def _validate_domain_randomization_cfg(self) -> None:
+        if self.cfg.obs_delay_steps_min < 0:
+            raise ValueError(f"obs_delay_steps_min must be >= 0. Got {self.cfg.obs_delay_steps_min}.")
+        if self.cfg.obs_delay_steps_max < self.cfg.obs_delay_steps_min:
+            raise ValueError(
+                "obs_delay_steps_max must be >= obs_delay_steps_min. "
+                f"Got {self.cfg.obs_delay_steps_max} < {self.cfg.obs_delay_steps_min}."
+            )
+        if self.cfg.obs_delay_jitter_extra_max < 0:
+            raise ValueError(f"obs_delay_jitter_extra_max must be >= 0. Got {self.cfg.obs_delay_jitter_extra_max}.")
+        if not self.cfg.obs_delay_proprio_only:
+            raise ValueError("Only proprioceptive observation delay is supported for this environment.")
+        if not 0.0 <= self.cfg.obs_delay_jitter_prob <= 1.0:
+            raise ValueError(f"obs_delay_jitter_prob must be in [0, 1]. Got {self.cfg.obs_delay_jitter_prob}.")
+        if not 0.0 <= self.cfg.material_randomization_prob <= 1.0:
+            raise ValueError(
+                f"material_randomization_prob must be in [0, 1]. Got {self.cfg.material_randomization_prob}."
+            )
+        if self.cfg.material_num_buckets <= 0:
+            raise ValueError(f"material_num_buckets must be > 0. Got {self.cfg.material_num_buckets}.")
+        self._validate_range("material_static_friction_range", self.cfg.material_static_friction_range)
+        self._validate_range("material_dynamic_friction_range", self.cfg.material_dynamic_friction_range)
+        self._validate_range("material_restitution_range", self.cfg.material_restitution_range)
+        self._validate_range("mass_scale_range", self.cfg.mass_scale_range)
+        if self.cfg.mass_scale_range[0] <= 0.0:
+            raise ValueError(f"mass_scale_range min must be > 0. Got {self.cfg.mass_scale_range[0]}.")
+        self._validate_range("com_offset_x_range", self.cfg.com_offset_x_range)
+        self._validate_range("com_offset_y_range", self.cfg.com_offset_y_range)
+        self._validate_range("com_offset_z_range", self.cfg.com_offset_z_range)
+        self._validate_range("motor_stiffness_scale_range", self.cfg.motor_stiffness_scale_range)
+        self._validate_range("motor_damping_scale_range", self.cfg.motor_damping_scale_range)
+        if self.cfg.motor_stiffness_scale_range[0] <= 0.0:
+            raise ValueError(
+                f"motor_stiffness_scale_range min must be > 0. Got {self.cfg.motor_stiffness_scale_range[0]}."
+            )
+        if self.cfg.motor_damping_scale_range[0] <= 0.0:
+            raise ValueError(
+                f"motor_damping_scale_range min must be > 0. Got {self.cfg.motor_damping_scale_range[0]}."
+            )
+        self._validate_range("push_interval_s", (self.cfg.push_interval_s_min, self.cfg.push_interval_s_max))
+        self._validate_range("push_duration_s", (self.cfg.push_duration_s_min, self.cfg.push_duration_s_max))
+        self._validate_range("push_force_x_range", self.cfg.push_force_x_range)
+        self._validate_range("push_force_y_range", self.cfg.push_force_y_range)
+        self._validate_range("push_force_z_range", self.cfg.push_force_z_range)
+        self._validate_range("push_torque_x_range", self.cfg.push_torque_x_range)
+        self._validate_range("push_torque_y_range", self.cfg.push_torque_y_range)
+        self._validate_range("push_torque_z_range", self.cfg.push_torque_z_range)
+
+    @staticmethod
+    def _validate_range(name: str, value_range: tuple[float, float]) -> None:
+        if value_range[1] < value_range[0]:
+            raise ValueError(f"{name} max must be >= min. Got {value_range[1]} < {value_range[0]}.")
+
+    def _sample_uniform_cpu(self, value_range: tuple[float, float], shape: tuple[int, ...]) -> torch.Tensor:
+        low, high = value_range
+        if high == low:
+            return torch.full(shape, float(low), dtype=torch.float, device="cpu")
+        return low + (high - low) * torch.rand(shape, generator=self._dr_rng, device="cpu")
+
+    def _sample_uniform_device(self, value_range: tuple[float, float], shape: tuple[int, ...], device: str) -> torch.Tensor:
+        return self._sample_uniform_cpu(value_range, shape).to(device=device)
+
+    def _seconds_to_steps(self, seconds: float) -> int:
+        return max(1, math.ceil(seconds / self.step_dt))
+
+    def _init_domain_randomization_state(self) -> None:
+        self._dr_all_env_ids = torch.arange(self.num_envs, device=self.device, dtype=torch.long)
+
+        # Material randomization state.
+        self._material_buckets = None
+        if self.cfg.enable_domain_randomization and self.cfg.enable_material_randomization:
+            static_samples = self._sample_uniform_cpu(
+                self.cfg.material_static_friction_range, (self.cfg.material_num_buckets,)
+            )
+            dynamic_samples = self._sample_uniform_cpu(
+                self.cfg.material_dynamic_friction_range, (self.cfg.material_num_buckets,)
+            )
+            restitution_samples = self._sample_uniform_cpu(
+                self.cfg.material_restitution_range, (self.cfg.material_num_buckets,)
+            )
+            if self.cfg.material_make_consistent:
+                dynamic_samples = torch.minimum(dynamic_samples, static_samples)
+            self._material_buckets = torch.stack((static_samples, dynamic_samples, restitution_samples), dim=-1)
+
+        # Mass / COM randomization state.
+        self._mass_body_ids_cpu = torch.tensor([], dtype=torch.long, device="cpu")
+        if self.cfg.enable_domain_randomization and (self.cfg.enable_mass_randomization or self.cfg.enable_com_randomization):
+            mass_body_ids, _ = self.robot.find_bodies(self.cfg.mass_randomize_body_name)
+            if len(mass_body_ids) == 0:
+                raise RuntimeError(
+                    f"Could not resolve mass/com randomization body '{self.cfg.mass_randomize_body_name}'."
+                )
+            self._mass_body_ids_cpu = torch.tensor(mass_body_ids, dtype=torch.long, device="cpu")
+        self._default_masses_cpu = self.robot.root_physx_view.get_masses().clone()
+        self._default_inertias_cpu = self.robot.root_physx_view.get_inertias().clone()
+        self._default_coms_cpu = self.robot.root_physx_view.get_coms().clone()
+
+        # Motor gain randomization state.
+        self._motor_actuator = None
+        self._motor_default_stiffness = None
+        self._motor_default_damping = None
+        self._motor_num_joints = 0
+        if self.cfg.enable_domain_randomization and self.cfg.enable_motor_gain_randomization:
+            if self.cfg.motor_gain_actuator_name not in self.robot.actuators:
+                raise RuntimeError(
+                    f"Motor gain actuator '{self.cfg.motor_gain_actuator_name}' not found. "
+                    f"Available: {list(self.robot.actuators.keys())}"
+                )
+            self._motor_actuator = self.robot.actuators[self.cfg.motor_gain_actuator_name]
+            self._motor_default_stiffness = self._motor_actuator.stiffness.clone()
+            self._motor_default_damping = self._motor_actuator.damping.clone()
+            self._motor_num_joints = self._motor_default_stiffness.shape[1]
+
+        # Observation delay state.
+        self._max_obs_delay_steps = (
+            self.cfg.obs_delay_steps_max + self.cfg.obs_delay_jitter_extra_max
+            if self.cfg.enable_domain_randomization and self.cfg.enable_obs_delay
+            else 0
+        )
+        self._proprio_obs_dim = (
+            3 + 3 + 3 + self._action_dim + self._action_dim + self._pendulum_dof_count + self._pendulum_dof_count + self._action_dim
+        )
+        self._obs_delay_buffer = DelayBuffer(self._max_obs_delay_steps, self.num_envs, self.device)
+        self._obs_delay_steps = torch.full(
+            (self.num_envs,),
+            self.cfg.obs_delay_steps_min,
+            device=self.device,
+            dtype=torch.long,
+        )
+        if self.cfg.enable_domain_randomization and self.cfg.enable_obs_delay:
+            if self.cfg.obs_delay_randomize_per_reset:
+                self._obs_delay_steps = torch.randint(
+                    self.cfg.obs_delay_steps_min,
+                    self.cfg.obs_delay_steps_max + 1,
+                    (self.num_envs,),
+                    device=self.device,
+                    dtype=torch.long,
+                )
+            else:
+                self._obs_delay_steps.fill_(self.cfg.obs_delay_steps_max)
+            self._obs_delay_buffer.set_time_lag(self._obs_delay_steps)
+
+        # Sensor bias / drift state.
+        self._bias_body_lin_vel = torch.zeros((self.num_envs, 3), device=self.device)
+        self._bias_body_ang_vel = torch.zeros((self.num_envs, 3), device=self.device)
+        self._bias_projected_gravity = torch.zeros((self.num_envs, 3), device=self.device)
+        self._bias_leg_joint_pos = torch.zeros((self.num_envs, self._action_dim), device=self.device)
+        self._bias_leg_joint_vel = torch.zeros((self.num_envs, self._action_dim), device=self.device)
+        self._bias_pendulum_joint_pos = torch.zeros((self.num_envs, self._pendulum_dof_count), device=self.device)
+        self._bias_pendulum_joint_vel = torch.zeros((self.num_envs, self._pendulum_dof_count), device=self.device)
+        self._sample_sensor_biases(self._dr_all_env_ids)
+
+        # External wrench push state.
+        self._push_body_ids = torch.tensor([], dtype=torch.long, device=self.device)
+        self._push_num_bodies = 0
+        if self.cfg.enable_domain_randomization and self.cfg.enable_external_wrench_push:
+            push_body_ids, _ = self.robot.find_bodies(self.cfg.push_body_name)
+            if len(push_body_ids) == 0:
+                raise RuntimeError(f"Could not resolve push body '{self.cfg.push_body_name}'.")
+            self._push_body_ids = torch.tensor(push_body_ids, dtype=torch.long, device=self.device)
+            self._push_num_bodies = len(push_body_ids)
+        self._push_forces = torch.zeros((self.num_envs, max(1, self._push_num_bodies), 3), device=self.device)
+        self._push_torques = torch.zeros_like(self._push_forces)
+        self._push_next_step = torch.zeros((self.num_envs,), device=self.device, dtype=torch.long)
+        self._push_end_step = torch.zeros((self.num_envs,), device=self.device, dtype=torch.long)
+        self._schedule_next_push(self._dr_all_env_ids, torch.zeros(self.num_envs, device=self.device, dtype=torch.long))
+
+    def _randomize_materials(self, env_ids: torch.Tensor) -> None:
+        if not (self.cfg.enable_domain_randomization and self.cfg.enable_material_randomization):
+            return
+        if not self.cfg.material_randomize_on_reset or self._material_buckets is None:
+            return
+        env_ids_cpu = env_ids.to(device="cpu", dtype=torch.long)
+        if env_ids_cpu.numel() == 0:
+            return
+        if self.cfg.material_randomization_prob < 1.0:
+            mask = torch.rand((env_ids_cpu.numel(),), generator=self._dr_rng, device="cpu") < self.cfg.material_randomization_prob
+            env_ids_cpu = env_ids_cpu[mask]
+            if env_ids_cpu.numel() == 0:
+                return
+        total_num_shapes = self.robot.root_physx_view.max_shapes
+        bucket_ids = torch.randint(
+            0,
+            self.cfg.material_num_buckets,
+            (env_ids_cpu.numel(), total_num_shapes),
+            generator=self._dr_rng,
+            device="cpu",
+        )
+        material_samples = self._material_buckets[bucket_ids]
+        materials = self.robot.root_physx_view.get_material_properties()
+        materials[env_ids_cpu] = material_samples
+        self.robot.root_physx_view.set_material_properties(materials, env_ids_cpu)
+
+    def _randomize_mass_and_com(self, env_ids: torch.Tensor) -> None:
+        if not self.cfg.enable_domain_randomization:
+            return
+        if self._mass_body_ids_cpu.numel() == 0:
+            return
+        env_ids_cpu = env_ids.to(device="cpu", dtype=torch.long)
+        if env_ids_cpu.numel() == 0:
+            return
+        body_ids_cpu = self._mass_body_ids_cpu
+
+        if self.cfg.enable_mass_randomization:
+            masses = self.robot.root_physx_view.get_masses()
+            masses[env_ids_cpu[:, None], body_ids_cpu] = self._default_masses_cpu[env_ids_cpu[:, None], body_ids_cpu]
+            mass_scales = self._sample_uniform_cpu(self.cfg.mass_scale_range, (env_ids_cpu.numel(), 1))
+            masses[env_ids_cpu[:, None], body_ids_cpu] *= mass_scales
+            self.robot.root_physx_view.set_masses(masses, env_ids_cpu)
+
+            if self.cfg.mass_recompute_inertia:
+                inertias = self.robot.root_physx_view.get_inertias()
+                inertias[env_ids_cpu[:, None], body_ids_cpu] = (
+                    self._default_inertias_cpu[env_ids_cpu[:, None], body_ids_cpu] * mass_scales.unsqueeze(-1)
+                )
+                self.robot.root_physx_view.set_inertias(inertias, env_ids_cpu)
+
+        if self.cfg.enable_com_randomization:
+            coms = self.robot.root_physx_view.get_coms().clone()
+            coms[env_ids_cpu[:, None], body_ids_cpu] = self._default_coms_cpu[env_ids_cpu[:, None], body_ids_cpu]
+            com_offsets = torch.zeros((env_ids_cpu.numel(), 1, 3), device="cpu")
+            com_offsets[:, :, 0] = self._sample_uniform_cpu(self.cfg.com_offset_x_range, (env_ids_cpu.numel(), 1))
+            com_offsets[:, :, 1] = self._sample_uniform_cpu(self.cfg.com_offset_y_range, (env_ids_cpu.numel(), 1))
+            com_offsets[:, :, 2] = self._sample_uniform_cpu(self.cfg.com_offset_z_range, (env_ids_cpu.numel(), 1))
+            coms[env_ids_cpu[:, None], body_ids_cpu, :3] += com_offsets
+            self.robot.root_physx_view.set_coms(coms, env_ids_cpu)
+
+    def _randomize_motor_gains(self, env_ids: torch.Tensor) -> None:
+        if not (self.cfg.enable_domain_randomization and self.cfg.enable_motor_gain_randomization):
+            return
+        if self._motor_actuator is None:
+            return
+        self._motor_actuator.stiffness[env_ids] = self._motor_default_stiffness[env_ids]
+        self._motor_actuator.damping[env_ids] = self._motor_default_damping[env_ids]
+        num_envs = env_ids.numel()
+        if num_envs == 0:
+            return
+        if self.cfg.motor_gain_per_joint:
+            gain_shape = (num_envs, self._motor_num_joints)
+        else:
+            gain_shape = (num_envs, 1)
+        stiffness_scale = self._sample_uniform_device(self.cfg.motor_stiffness_scale_range, gain_shape, self.device)
+        damping_scale = self._sample_uniform_device(self.cfg.motor_damping_scale_range, gain_shape, self.device)
+        self._motor_actuator.stiffness[env_ids] *= stiffness_scale
+        self._motor_actuator.damping[env_ids] *= damping_scale
+
+    def _sample_sensor_biases(self, env_ids: torch.Tensor) -> None:
+        if not (self.cfg.enable_domain_randomization and self.cfg.enable_sensor_bias_drift):
+            return
+        num_envs = env_ids.numel()
+        if num_envs == 0:
+            return
+        self._bias_body_lin_vel[env_ids] = self._sample_uniform_device(
+            (-self.cfg.imu_lin_vel_bias_range, self.cfg.imu_lin_vel_bias_range), (num_envs, 3), self.device
+        )
+        self._bias_body_ang_vel[env_ids] = self._sample_uniform_device(
+            (-self.cfg.imu_ang_vel_bias_range, self.cfg.imu_ang_vel_bias_range), (num_envs, 3), self.device
+        )
+        self._bias_projected_gravity[env_ids] = self._sample_uniform_device(
+            (-self.cfg.imu_gravity_bias_range, self.cfg.imu_gravity_bias_range), (num_envs, 3), self.device
+        )
+        self._bias_leg_joint_pos[env_ids] = self._sample_uniform_device(
+            (-self.cfg.encoder_joint_pos_bias_range, self.cfg.encoder_joint_pos_bias_range),
+            (num_envs, self._action_dim),
+            self.device,
+        )
+        self._bias_leg_joint_vel[env_ids] = self._sample_uniform_device(
+            (-self.cfg.encoder_joint_vel_bias_range, self.cfg.encoder_joint_vel_bias_range),
+            (num_envs, self._action_dim),
+            self.device,
+        )
+        if self._pendulum_dof_count > 0:
+            self._bias_pendulum_joint_pos[env_ids] = self._sample_uniform_device(
+                (-self.cfg.encoder_pendulum_pos_bias_range, self.cfg.encoder_pendulum_pos_bias_range),
+                (num_envs, self._pendulum_dof_count),
+                self.device,
+            )
+            self._bias_pendulum_joint_vel[env_ids] = self._sample_uniform_device(
+                (-self.cfg.encoder_pendulum_vel_bias_range, self.cfg.encoder_pendulum_vel_bias_range),
+                (num_envs, self._pendulum_dof_count),
+                self.device,
+            )
+
+    def _update_sensor_bias_drift(self) -> None:
+        if not (self.cfg.enable_domain_randomization and self.cfg.enable_sensor_bias_drift):
+            return
+        drift_scale = math.sqrt(self.step_dt)
+        self._bias_body_lin_vel += torch.randn_like(self._bias_body_lin_vel) * (
+            self.cfg.imu_lin_vel_drift_std_per_s * drift_scale
+        )
+        self._bias_body_ang_vel += torch.randn_like(self._bias_body_ang_vel) * (
+            self.cfg.imu_ang_vel_drift_std_per_s * drift_scale
+        )
+        self._bias_projected_gravity += torch.randn_like(self._bias_projected_gravity) * (
+            self.cfg.imu_gravity_drift_std_per_s * drift_scale
+        )
+        self._bias_leg_joint_pos += torch.randn_like(self._bias_leg_joint_pos) * (
+            self.cfg.encoder_joint_pos_drift_std_per_s * drift_scale
+        )
+        self._bias_leg_joint_vel += torch.randn_like(self._bias_leg_joint_vel) * (
+            self.cfg.encoder_joint_vel_drift_std_per_s * drift_scale
+        )
+        if self._pendulum_dof_count > 0:
+            self._bias_pendulum_joint_pos += torch.randn_like(self._bias_pendulum_joint_pos) * (
+                self.cfg.encoder_pendulum_pos_drift_std_per_s * drift_scale
+            )
+            self._bias_pendulum_joint_vel += torch.randn_like(self._bias_pendulum_joint_vel) * (
+                self.cfg.encoder_pendulum_vel_drift_std_per_s * drift_scale
+            )
+
+        self._bias_body_lin_vel = torch.clamp(
+            self._bias_body_lin_vel, -self.cfg.imu_lin_vel_bias_range, self.cfg.imu_lin_vel_bias_range
+        )
+        self._bias_body_ang_vel = torch.clamp(
+            self._bias_body_ang_vel, -self.cfg.imu_ang_vel_bias_range, self.cfg.imu_ang_vel_bias_range
+        )
+        self._bias_projected_gravity = torch.clamp(
+            self._bias_projected_gravity, -self.cfg.imu_gravity_bias_range, self.cfg.imu_gravity_bias_range
+        )
+        self._bias_leg_joint_pos = torch.clamp(
+            self._bias_leg_joint_pos, -self.cfg.encoder_joint_pos_bias_range, self.cfg.encoder_joint_pos_bias_range
+        )
+        self._bias_leg_joint_vel = torch.clamp(
+            self._bias_leg_joint_vel, -self.cfg.encoder_joint_vel_bias_range, self.cfg.encoder_joint_vel_bias_range
+        )
+        if self._pendulum_dof_count > 0:
+            self._bias_pendulum_joint_pos = torch.clamp(
+                self._bias_pendulum_joint_pos,
+                -self.cfg.encoder_pendulum_pos_bias_range,
+                self.cfg.encoder_pendulum_pos_bias_range,
+            )
+            self._bias_pendulum_joint_vel = torch.clamp(
+                self._bias_pendulum_joint_vel,
+                -self.cfg.encoder_pendulum_vel_bias_range,
+                self.cfg.encoder_pendulum_vel_bias_range,
+            )
+
+    def _apply_obs_delay_and_jitter(self, proprio_obs: torch.Tensor) -> torch.Tensor:
+        if not (self.cfg.enable_domain_randomization and self.cfg.enable_obs_delay):
+            return proprio_obs
+        effective_delay = self._obs_delay_steps.clone()
+        if self.cfg.obs_delay_jitter_extra_max > 0 and self.cfg.obs_delay_jitter_prob > 0.0:
+            jitter_mask = torch.rand((self.num_envs,), device=self.device) < self.cfg.obs_delay_jitter_prob
+            jitter_extra = torch.randint(
+                0,
+                self.cfg.obs_delay_jitter_extra_max + 1,
+                (self.num_envs,),
+                device=self.device,
+                dtype=torch.long,
+            )
+            effective_delay = effective_delay + jitter_mask.long() * jitter_extra
+        effective_delay = torch.clamp(effective_delay, 0, self._max_obs_delay_steps)
+        self._obs_delay_buffer.set_time_lag(effective_delay)
+        return self._obs_delay_buffer.compute(proprio_obs)
+
+    def _schedule_next_push(self, env_ids: torch.Tensor, now_step: torch.Tensor) -> None:
+        if not (self.cfg.enable_domain_randomization and self.cfg.enable_external_wrench_push):
+            return
+        if env_ids.numel() == 0:
+            return
+        min_interval_steps = self._seconds_to_steps(self.cfg.push_interval_s_min)
+        max_interval_steps = self._seconds_to_steps(self.cfg.push_interval_s_max)
+        interval_steps = torch.randint(
+            min_interval_steps,
+            max_interval_steps + 1,
+            (env_ids.numel(),),
+            device=self.device,
+            dtype=torch.long,
+        )
+        self._push_next_step[env_ids] = now_step + interval_steps
+
+    def _update_external_wrench_pushes(self) -> None:
+        if not (self.cfg.enable_domain_randomization and self.cfg.enable_external_wrench_push):
+            return
+        if self._push_num_bodies == 0:
+            return
+
+        now_step = self._steps_since_reset
+        push_finished = (self._push_end_step > 0) & (now_step >= self._push_end_step)
+        if torch.any(push_finished):
+            self._push_forces[push_finished] = 0.0
+            self._push_torques[push_finished] = 0.0
+            self._push_end_step[push_finished] = 0
+
+        start_push = (self._push_end_step == 0) & (now_step >= self._push_next_step)
+        if torch.any(start_push):
+            env_ids = torch.nonzero(start_push, as_tuple=False).squeeze(-1)
+            min_duration_steps = self._seconds_to_steps(self.cfg.push_duration_s_min)
+            max_duration_steps = self._seconds_to_steps(self.cfg.push_duration_s_max)
+            duration_steps = torch.randint(
+                min_duration_steps,
+                max_duration_steps + 1,
+                (env_ids.numel(),),
+                device=self.device,
+                dtype=torch.long,
+            )
+            push_forces = torch.zeros((env_ids.numel(), self._push_num_bodies, 3), device=self.device)
+            push_torques = torch.zeros_like(push_forces)
+            push_forces[:, :, 0] = self._sample_uniform_device(
+                self.cfg.push_force_x_range, (env_ids.numel(), self._push_num_bodies), self.device
+            )
+            push_forces[:, :, 1] = self._sample_uniform_device(
+                self.cfg.push_force_y_range, (env_ids.numel(), self._push_num_bodies), self.device
+            )
+            push_forces[:, :, 2] = self._sample_uniform_device(
+                self.cfg.push_force_z_range, (env_ids.numel(), self._push_num_bodies), self.device
+            )
+            push_torques[:, :, 0] = self._sample_uniform_device(
+                self.cfg.push_torque_x_range, (env_ids.numel(), self._push_num_bodies), self.device
+            )
+            push_torques[:, :, 1] = self._sample_uniform_device(
+                self.cfg.push_torque_y_range, (env_ids.numel(), self._push_num_bodies), self.device
+            )
+            push_torques[:, :, 2] = self._sample_uniform_device(
+                self.cfg.push_torque_z_range, (env_ids.numel(), self._push_num_bodies), self.device
+            )
+            self._push_forces[env_ids] = push_forces
+            self._push_torques[env_ids] = push_torques
+            self._push_end_step[env_ids] = now_step[env_ids] + duration_steps
+            self._schedule_next_push(env_ids, self._push_end_step[env_ids])
+
+        self.robot.set_external_force_and_torque(
+            forces=self._push_forces[:, : self._push_num_bodies, :],
+            torques=self._push_torques[:, : self._push_num_bodies, :],
+            body_ids=self._push_body_ids,
+            is_global=self.cfg.push_is_global,
+        )
+
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
+        self._update_external_wrench_pushes()
         self._actions_raw_policy = actions.clone()
         if self.cfg.enable_per_joint_action_bounds:
             self._actions_bounded = torch.clamp(self._actions_raw_policy, min=self._action_low, max=self._action_high)
@@ -367,6 +803,18 @@ class Go2PendulumEnv(DirectRLEnv):
 
         body_lin_vel_b = self.robot.data.root_lin_vel_b.clone()
         body_ang_vel_b = self.robot.data.root_ang_vel_b.clone()
+        projected_gravity_b = self.robot.data.projected_gravity_b.clone()
+
+        self._update_sensor_bias_drift()
+        if self.cfg.enable_domain_randomization and self.cfg.enable_sensor_bias_drift:
+            body_lin_vel_b = body_lin_vel_b + self._bias_body_lin_vel
+            body_ang_vel_b = body_ang_vel_b + self._bias_body_ang_vel
+            projected_gravity_b = projected_gravity_b + self._bias_projected_gravity
+            leg_joint_pos = leg_joint_pos + self._bias_leg_joint_pos
+            leg_joint_vel = leg_joint_vel + self._bias_leg_joint_vel
+            if self._pendulum_dof_count > 0:
+                pendulum_joint_pos = pendulum_joint_pos + self._bias_pendulum_joint_pos
+                pendulum_joint_vel = pendulum_joint_vel + self._bias_pendulum_joint_vel
 
         body_lin_vel_noise = self.cfg.body_lin_vel_noise * self.cfg.observation_noise_scale
         body_ang_vel_noise = self.cfg.body_ang_vel_noise * self.cfg.observation_noise_scale
@@ -420,18 +868,48 @@ class Go2PendulumEnv(DirectRLEnv):
                 )
         state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
 
-        policy_tensors = [
-            body_lin_vel_b,
-            body_ang_vel_b,
-            self.robot.data.projected_gravity_b,
-            state_error,
-            leg_joint_pos,
-            leg_joint_vel,
-            pendulum_joint_pos,
-            pendulum_joint_vel,
-        ]
+        proprio_block = torch.cat(
+            [
+                body_lin_vel_b,
+                body_ang_vel_b,
+                projected_gravity_b,
+                leg_joint_pos,
+                leg_joint_vel,
+                pendulum_joint_pos,
+                pendulum_joint_vel,
+                self._actions_executed,
+            ],
+            dim=-1,
+        )
+        proprio_block = self._apply_obs_delay_and_jitter(proprio_block)
+        idx0 = 3
+        idx1 = idx0 + 3
+        idx2 = idx1 + 3
+        idx3 = idx2 + self._action_dim
+        idx4 = idx3 + self._action_dim
+        idx5 = idx4 + self._pendulum_dof_count
+        idx6 = idx5 + self._pendulum_dof_count
+        delayed_body_lin_vel = proprio_block[:, :idx0]
+        delayed_body_ang_vel = proprio_block[:, idx0:idx1]
+        delayed_projected_gravity = proprio_block[:, idx1:idx2]
+        delayed_leg_joint_pos = proprio_block[:, idx2:idx3]
+        delayed_leg_joint_vel = proprio_block[:, idx3:idx4]
+        delayed_pendulum_joint_pos = proprio_block[:, idx4:idx5]
+        delayed_pendulum_joint_vel = proprio_block[:, idx5:idx6]
+        delayed_actions = proprio_block[:, idx6:]
 
-        policy_tensors.extend([self._actions_executed, self.clock_inputs])
+        policy_tensors = [
+            delayed_body_lin_vel,
+            delayed_body_ang_vel,
+            delayed_projected_gravity,
+            state_error,
+            delayed_leg_joint_pos,
+            delayed_leg_joint_vel,
+            delayed_pendulum_joint_pos,
+            delayed_pendulum_joint_vel,
+            delayed_actions,
+            self.clock_inputs,
+        ]
 
         observations = {"policy": torch.cat(policy_tensors, dim=-1)}
         return observations
@@ -731,6 +1209,7 @@ class Go2PendulumEnv(DirectRLEnv):
         self._previous_actions[env_ids] = 0.0
         self._processed_actions[env_ids] = 0.0
         self._action_delay_buffer[env_ids] = 0.0
+        self._steps_since_reset[env_ids] = 0
         if self.cfg.enable_action_delay:
             if self.cfg.action_delay_randomize_per_reset:
                 self._action_delay_steps[env_ids] = torch.randint(
@@ -743,8 +1222,30 @@ class Go2PendulumEnv(DirectRLEnv):
             else:
                 self._action_delay_steps[env_ids] = self.cfg.action_delay_steps_max
 
+        if self.cfg.enable_domain_randomization:
+            self._randomize_materials(env_ids)
+            self._randomize_mass_and_com(env_ids)
+            self._randomize_motor_gains(env_ids)
+            self._sample_sensor_biases(env_ids)
+            if self.cfg.enable_obs_delay:
+                self._obs_delay_buffer.reset(env_ids)
+                if self.cfg.obs_delay_randomize_per_reset:
+                    self._obs_delay_steps[env_ids] = torch.randint(
+                        self.cfg.obs_delay_steps_min,
+                        self.cfg.obs_delay_steps_max + 1,
+                        (env_ids.numel(),),
+                        device=self.device,
+                        dtype=torch.long,
+                    )
+                else:
+                    self._obs_delay_steps[env_ids] = self.cfg.obs_delay_steps_max
+            if self.cfg.enable_external_wrench_push:
+                self._push_forces[env_ids] = 0.0
+                self._push_torques[env_ids] = 0.0
+                self._push_end_step[env_ids] = 0
+                self._schedule_next_push(env_ids, self._steps_since_reset[env_ids])
+
         # Reset variables.
-        self._steps_since_reset[env_ids] = 0
         self.last_actions[env_ids] = 0
         self.gait_indices[env_ids] = 0
         if self._base_height_failure_steps is not None:

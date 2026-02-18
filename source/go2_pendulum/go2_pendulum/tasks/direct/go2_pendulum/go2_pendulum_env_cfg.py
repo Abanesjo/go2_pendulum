@@ -91,6 +91,78 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     use_pendulum = True
     track_goal = False
 
+    # Domain randomization.
+    enable_domain_randomization = True
+    dr_seed_offset = 0
+
+    # Material randomization (robot only).
+    enable_material_randomization = True
+    material_randomize_on_reset = True
+    material_randomization_prob = 1.0
+    material_num_buckets = 64
+    material_static_friction_range = (0.5, 1.25)
+    material_dynamic_friction_range = (0.4, 1.1)
+    material_restitution_range = (0.0, 0.05)
+    material_make_consistent = True
+
+    # Base mass / center-of-mass randomization.
+    enable_mass_randomization = True
+    mass_randomize_body_name = "base"
+    mass_scale_range = (0.85, 1.15)
+    mass_recompute_inertia = True
+    enable_com_randomization = True
+    com_offset_x_range = (-0.015, 0.015)
+    com_offset_y_range = (-0.015, 0.015)
+    com_offset_z_range = (-0.01, 0.01)
+
+    # Motor gain randomization (PD gain scaling).
+    enable_motor_gain_randomization = True
+    motor_gain_actuator_name = "base_legs"
+    motor_stiffness_scale_range = (0.8, 1.2)
+    motor_damping_scale_range = (0.8, 1.2)
+    motor_gain_per_joint = False
+
+    # Proprioceptive observation delay / jitter.
+    enable_obs_delay = True
+    obs_delay_steps_min = 0
+    obs_delay_steps_max = 1
+    obs_delay_randomize_per_reset = True
+    obs_delay_jitter_prob = 0.1
+    obs_delay_jitter_extra_max = 1
+    obs_delay_proprio_only = True
+
+    # Sensor bias and drift randomization.
+    enable_sensor_bias_drift = True
+    imu_lin_vel_bias_range = 0.05
+    imu_ang_vel_bias_range = math.radians(3.0)
+    imu_gravity_bias_range = 0.03
+    imu_lin_vel_drift_std_per_s = 0.01
+    imu_ang_vel_drift_std_per_s = math.radians(0.5)
+    imu_gravity_drift_std_per_s = 0.005
+    encoder_joint_pos_bias_range = math.radians(1.5)
+    encoder_joint_vel_bias_range = math.radians(6.0)
+    encoder_pendulum_pos_bias_range = math.radians(0.8)
+    encoder_pendulum_vel_bias_range = math.radians(4.0)
+    encoder_joint_pos_drift_std_per_s = math.radians(0.2)
+    encoder_joint_vel_drift_std_per_s = math.radians(1.0)
+    encoder_pendulum_pos_drift_std_per_s = math.radians(0.1)
+    encoder_pendulum_vel_drift_std_per_s = math.radians(0.5)
+
+    # External wrench pushes.
+    enable_external_wrench_push = True
+    push_body_name = "base"
+    push_is_global = True
+    push_interval_s_min = 2.0
+    push_interval_s_max = 5.0
+    push_duration_s_min = 0.05
+    push_duration_s_max = 0.15
+    push_force_x_range = (-25.0, 25.0)
+    push_force_y_range = (-25.0, 25.0)
+    push_force_z_range = (0.0, 0.0)
+    push_torque_x_range = (0.0, 0.0)
+    push_torque_y_range = (0.0, 0.0)
+    push_torque_z_range = (-3.0, 3.0)
+
     # Initial conditions (reset sampling).
     # - Goal target sampling in the environment frame.
     goal_randomization_dist_min = 0.5
