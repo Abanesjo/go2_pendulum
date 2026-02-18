@@ -192,7 +192,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     termination_penalty = -500.0
 
     # Position tracking and heading alignment.
-    position_reward_scale = 0.4
+    position_reward_scale = 0.8
     position_reward_sigma = 0.6
     progress_reward_scale = 100.0
     yaw_alignment_reward_scale = 0.3
