@@ -816,12 +816,13 @@ class Go2PendulumEnv(DirectRLEnv):
                 pendulum_joint_pos = pendulum_joint_pos + self._bias_pendulum_joint_pos
                 pendulum_joint_vel = pendulum_joint_vel + self._bias_pendulum_joint_vel
 
-        body_lin_vel_noise = self.cfg.body_lin_vel_noise * self.cfg.observation_noise_scale
-        body_ang_vel_noise = self.cfg.body_ang_vel_noise * self.cfg.observation_noise_scale
-        position_noise = self.cfg.position_noise * self.cfg.observation_noise_scale
-        orientation_noise = self.cfg.orientation_noise * self.cfg.observation_noise_scale
-        pendulum_joint_pos_noise = self.cfg.pendulum_joint_pos_noise * self.cfg.observation_noise_scale
-        pendulum_joint_vel_noise = self.cfg.pendulum_joint_vel_noise * self.cfg.observation_noise_scale
+        obs_noise_scale = self.cfg.observation_noise_scale if self.cfg.enable_domain_randomization else 0.0
+        body_lin_vel_noise = self.cfg.body_lin_vel_noise * obs_noise_scale
+        body_ang_vel_noise = self.cfg.body_ang_vel_noise * obs_noise_scale
+        position_noise = self.cfg.position_noise * obs_noise_scale
+        orientation_noise = self.cfg.orientation_noise * obs_noise_scale
+        pendulum_joint_pos_noise = self.cfg.pendulum_joint_pos_noise * obs_noise_scale
+        pendulum_joint_vel_noise = self.cfg.pendulum_joint_vel_noise * obs_noise_scale
 
         if body_lin_vel_noise > 0.0:
             body_lin_vel_b = body_lin_vel_b + sample_uniform(

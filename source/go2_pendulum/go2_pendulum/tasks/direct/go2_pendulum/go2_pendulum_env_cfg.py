@@ -84,7 +84,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_per_joint_action_bounds = True
     action_bound_margin = 1.0
     enable_desired_joint_pos_hard_clamp = True
-    action_over_limit_power = 4.0
+    action_over_limit_power = 2.0
     observation_space = 48 + 4 + 4
     state_space = 0
     debug_vis = True
@@ -92,7 +92,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     track_goal = False
 
     # Domain randomization.
-    enable_domain_randomization = True
+    enable_domain_randomization = False
     dr_seed_offset = 0
 
     # Material randomization (robot only).
@@ -180,15 +180,15 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Termination conditions.
     termination_grace_s = 0.1
     base_contact_grace_s = 0.5
-    base_height_min = 0.25
+    base_height_min = -1.0 #0.3
     base_height_terminate_duration_s = 0.1
 
     pendulum_contact_force_threshold = 1.0
     pendulum_terminate_angle_rad = math.radians(9.0)
-    pendulum_terminate_duration_s = 3.0
+    pendulum_terminate_duration_s = 25.0
 
     position_tolerance = 0.1
-    position_terminate_duration_s = 12.0
+    position_terminate_duration_s = 25.0
     termination_penalty = -500.0
 
     # Position tracking and heading alignment.
@@ -211,7 +211,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     feet_air_time_reward_scale = 0.1
     action_rate_reward_scale = -0.0001
     action_soft_limit = 2.0
-    action_over_limit_reward_scale = -0.01
+    action_over_limit_reward_scale = -0.001
     torque_reward_scale = -0.0001
     orient_reward_scale = 0.1
     lin_vel_z_reward_scale = -2.0
