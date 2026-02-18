@@ -83,8 +83,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # Initial conditions (reset sampling).
     # - Goal target sampling in the environment frame.
-    goal_randomization_dist_min = 0.5
-    goal_randomization_dist_max = 1.0
+    goal_randomization_dist_min = 0.0
+    goal_randomization_dist_max = 0.5
     goal_randomization_angle_min = math.radians(0)
     goal_randomization_angle_max = math.radians(360)
     goal_yaw_randomization_min = math.radians(-30)
@@ -93,7 +93,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # - Pendulum reset angle sampling.
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
     pendulum_angle_min = math.radians(0.0)
-    pendulum_angle_max = math.radians(9.0)
+    pendulum_angle_max = math.radians(9.9)
 
     # Termination conditions.
     termination_grace_s = 0.1
