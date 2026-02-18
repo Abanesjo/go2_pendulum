@@ -72,6 +72,25 @@ class Go2PendulumEnv(DirectRLEnv):
                 f"{len(leg_joint_ids)} vs {self.cfg.action_space}."
             )
         self._leg_dof_ids = torch.tensor(leg_joint_ids, device=self.device, dtype=torch.long)
+        self._action_dim = gym.spaces.flatdim(self.single_action_space)
+        if self.cfg.action_scale <= 0.0:
+            raise ValueError(f"action_scale must be > 0. Got {self.cfg.action_scale}.")
+        if self.cfg.enable_action_lpf and self.cfg.action_lpf_cutoff_hz <= 0.0:
+            raise ValueError(f"action_lpf_cutoff_hz must be > 0. Got {self.cfg.action_lpf_cutoff_hz}.")
+        if self.cfg.action_delay_steps_min < 0:
+            raise ValueError(f"action_delay_steps_min must be >= 0. Got {self.cfg.action_delay_steps_min}.")
+        if self.cfg.action_delay_steps_max < self.cfg.action_delay_steps_min:
+            raise ValueError(
+                "action_delay_steps_max must be >= action_delay_steps_min. "
+                f"Got {self.cfg.action_delay_steps_max} < {self.cfg.action_delay_steps_min}."
+            )
+        if self.cfg.action_bound_margin <= 0.0:
+            raise ValueError(f"action_bound_margin must be > 0. Got {self.cfg.action_bound_margin}.")
+        control_dt = self.cfg.sim.dt * self.cfg.decimation
+        self._action_lpf_alpha = (
+            math.exp(-2.0 * math.pi * self.cfg.action_lpf_cutoff_hz * control_dt) if self.cfg.enable_action_lpf else 0.0
+        )
+        self._max_action_delay_steps = self.cfg.action_delay_steps_max if self.cfg.enable_action_delay else 0
 
         self._pendulum_dof_count = len(self.cfg.pendulum_joint_names)
         if self.cfg.use_pendulum:
@@ -90,12 +109,59 @@ class Go2PendulumEnv(DirectRLEnv):
             self._pendulum_dof_ids = torch.tensor([], device=self.device, dtype=torch.long)
             self._pendulum_ee_body_id = None
 
+        # Derive action and joint-position bounds from soft joint limits.
+        leg_joint_pos_limits = self.robot.data.soft_joint_pos_limits[:, self._leg_dof_ids, :]
+        leg_default_joint_pos = self.robot.data.default_joint_pos[:, self._leg_dof_ids]
+        self._joint_pos_low = leg_joint_pos_limits[:, :, 0].clone()
+        self._joint_pos_high = leg_joint_pos_limits[:, :, 1].clone()
+        if self.cfg.enable_per_joint_action_bounds:
+            action_low = (self._joint_pos_low - leg_default_joint_pos) / self.cfg.action_scale
+            action_high = (self._joint_pos_high - leg_default_joint_pos) / self.cfg.action_scale
+            action_center = 0.5 * (action_low + action_high)
+            action_half_range = 0.5 * (action_high - action_low) * self.cfg.action_bound_margin
+            self._action_low = action_center - action_half_range
+            self._action_high = action_center + action_half_range
+        else:
+            self._action_low = torch.zeros((self.num_envs, self._action_dim), device=self.device)
+            self._action_high = torch.zeros_like(self._action_low)
+            if self.cfg.enable_action_clipping:
+                self._action_low.fill_(-self.cfg.action_clip)
+                self._action_high.fill_(self.cfg.action_clip)
+            else:
+                self._action_low.fill_(-self.cfg.action_soft_limit)
+                self._action_high.fill_(self.cfg.action_soft_limit)
+
         # Joint position command (deviation from default joint positions).
-        self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
-        self._actions_clipped = torch.zeros_like(self._actions)
-        self._previous_actions = torch.zeros(
-            self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device
+        self._actions_raw_policy = torch.zeros(self.num_envs, self._action_dim, device=self.device)
+        self._actions_bounded = torch.zeros_like(self._actions_raw_policy)
+        self._actions_delayed = torch.zeros_like(self._actions_raw_policy)
+        self._actions_filtered = torch.zeros_like(self._actions_raw_policy)
+        self._actions_executed = torch.zeros_like(self._actions_raw_policy)
+        self._processed_actions = torch.zeros_like(self._actions_raw_policy)
+        self._previous_actions = torch.zeros_like(self._actions_raw_policy)
+        self.desired_joint_pos = leg_default_joint_pos.clone()
+        self._action_delay_buffer = torch.zeros(
+            self.num_envs,
+            self._action_dim,
+            self._max_action_delay_steps + 1,
+            device=self.device,
         )
+        self._action_delay_steps = torch.full(
+            (self.num_envs,),
+            self.cfg.action_delay_steps_min,
+            device=self.device,
+            dtype=torch.long,
+        )
+        if self.cfg.enable_action_delay and self.cfg.action_delay_randomize_per_reset:
+            self._action_delay_steps = torch.randint(
+                self.cfg.action_delay_steps_min,
+                self.cfg.action_delay_steps_max + 1,
+                (self.num_envs,),
+                device=self.device,
+                dtype=torch.long,
+            )
+        elif self.cfg.enable_action_delay:
+            self._action_delay_steps.fill_(self.cfg.action_delay_steps_max)
 
         # Target state [x_d, y_d, yaw_d] in environment frame (randomized per reset).
         self.target_state = None
@@ -145,7 +211,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
         self.last_actions = torch.zeros(
             self.num_envs,
-            gym.spaces.flatdim(self.single_action_space),
+            self._action_dim,
             3,
             dtype=torch.float,
             device=self.device,
@@ -208,16 +274,42 @@ class Go2PendulumEnv(DirectRLEnv):
         self.target_visualizer = VisualizationMarkers(self.cfg.target_marker_cfg)
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
-        self._actions = actions.clone()
-        if self.cfg.enable_action_clipping:
-            self._actions_clipped = torch.clamp(self._actions, -self.cfg.action_clip, self.cfg.action_clip)
+        self._actions_raw_policy = actions.clone()
+        if self.cfg.enable_per_joint_action_bounds:
+            self._actions_bounded = torch.clamp(self._actions_raw_policy, min=self._action_low, max=self._action_high)
+        elif self.cfg.enable_action_clipping:
+            self._actions_bounded = torch.clamp(self._actions_raw_policy, -self.cfg.action_clip, self.cfg.action_clip)
         else:
-            self._actions_clipped = self._actions.clone()
-        self._processed_actions = self.cfg.action_scale * self._actions_clipped
+            self._actions_bounded = self._actions_raw_policy.clone()
+
+        if self.cfg.enable_action_delay:
+            self._action_delay_buffer = torch.roll(self._action_delay_buffer, shifts=1, dims=2)
+            self._action_delay_buffer[:, :, 0] = self._actions_bounded
+            delay_idx = self._action_delay_steps.clamp(max=self._max_action_delay_steps).view(self.num_envs, 1, 1)
+            delay_idx = delay_idx.expand(-1, self._action_dim, 1)
+            self._actions_delayed = torch.gather(self._action_delay_buffer, dim=2, index=delay_idx).squeeze(-1)
+        else:
+            self._actions_delayed = self._actions_bounded.clone()
+
+        if self.cfg.enable_action_lpf:
+            self._actions_filtered = (
+                self._action_lpf_alpha * self._actions_filtered + (1.0 - self._action_lpf_alpha) * self._actions_delayed
+            )
+            if self.cfg.enable_per_joint_action_bounds:
+                self._actions_filtered = torch.clamp(self._actions_filtered, min=self._action_low, max=self._action_high)
+            self._actions_executed = self._actions_filtered.clone()
+        else:
+            self._actions_executed = self._actions_delayed.clone()
+
+        self._processed_actions = self.cfg.action_scale * self._actions_executed
 
         self.desired_joint_pos = (
             self.robot.data.default_joint_pos[:, self._leg_dof_ids] + self._processed_actions
         )
+        if self.cfg.enable_desired_joint_pos_hard_clamp:
+            self.desired_joint_pos = torch.clamp(
+                self.desired_joint_pos, min=self._joint_pos_low, max=self._joint_pos_high
+            )
 
     def _apply_action(self) -> None:
         self.robot.set_joint_position_target(
@@ -226,7 +318,7 @@ class Go2PendulumEnv(DirectRLEnv):
         )
 
     def _get_observations(self) -> dict:
-        self._previous_actions = self._actions.clone()
+        self._previous_actions = self._actions_raw_policy.clone()
 
         leg_joint_pos = (
             self.robot.data.joint_pos[:, self._leg_dof_ids] - self.robot.data.default_joint_pos[:, self._leg_dof_ids]
@@ -273,8 +365,30 @@ class Go2PendulumEnv(DirectRLEnv):
         else:
             yaw_error = math_utils.wrap_to_pi(target_yaw - yaw)
 
+        body_lin_vel_b = self.robot.data.root_lin_vel_b.clone()
+        body_ang_vel_b = self.robot.data.root_ang_vel_b.clone()
+
+        body_lin_vel_noise = self.cfg.body_lin_vel_noise * self.cfg.observation_noise_scale
+        body_ang_vel_noise = self.cfg.body_ang_vel_noise * self.cfg.observation_noise_scale
         position_noise = self.cfg.position_noise * self.cfg.observation_noise_scale
         orientation_noise = self.cfg.orientation_noise * self.cfg.observation_noise_scale
+        pendulum_joint_pos_noise = self.cfg.pendulum_joint_pos_noise * self.cfg.observation_noise_scale
+        pendulum_joint_vel_noise = self.cfg.pendulum_joint_vel_noise * self.cfg.observation_noise_scale
+
+        if body_lin_vel_noise > 0.0:
+            body_lin_vel_b = body_lin_vel_b + sample_uniform(
+                -body_lin_vel_noise,
+                body_lin_vel_noise,
+                body_lin_vel_b.shape,
+                body_lin_vel_b.device,
+            )
+        if body_ang_vel_noise > 0.0:
+            body_ang_vel_b = body_ang_vel_b + sample_uniform(
+                -body_ang_vel_noise,
+                body_ang_vel_noise,
+                body_ang_vel_b.shape,
+                body_ang_vel_b.device,
+            )
         if position_noise > 0.0:
             position_error_xy = position_error_xy + sample_uniform(
                 -position_noise,
@@ -289,11 +403,26 @@ class Go2PendulumEnv(DirectRLEnv):
                 yaw_error.shape,
                 yaw_error.device,
             )
+        if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
+            if pendulum_joint_pos_noise > 0.0:
+                pendulum_joint_pos = pendulum_joint_pos + sample_uniform(
+                    -pendulum_joint_pos_noise,
+                    pendulum_joint_pos_noise,
+                    pendulum_joint_pos.shape,
+                    pendulum_joint_pos.device,
+                )
+            if pendulum_joint_vel_noise > 0.0:
+                pendulum_joint_vel = pendulum_joint_vel + sample_uniform(
+                    -pendulum_joint_vel_noise,
+                    pendulum_joint_vel_noise,
+                    pendulum_joint_vel.shape,
+                    pendulum_joint_vel.device,
+                )
         state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
 
         policy_tensors = [
-            self.robot.data.root_lin_vel_b,
-            self.robot.data.root_ang_vel_b,
+            body_lin_vel_b,
+            body_ang_vel_b,
             self.robot.data.projected_gravity_b,
             state_error,
             leg_joint_pos,
@@ -302,7 +431,7 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_vel,
         ]
 
-        policy_tensors.extend([self._actions_clipped, self.clock_inputs])
+        policy_tensors.extend([self._actions_executed, self.clock_inputs])
 
         observations = {"policy": torch.cat(policy_tensors, dim=-1)}
         return observations
@@ -340,19 +469,20 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_base_height_count += 1
 
         rew_action_rate = torch.sum(
-            torch.square(self._actions - self.last_actions[:, :, 0]),
+            torch.square(self._actions_executed - self.last_actions[:, :, 0]),
             dim=1,
         ) * (self.cfg.action_scale**2)
 
         rew_action_rate += torch.sum(
-            torch.square(self._actions - 2 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]),
+            torch.square(self._actions_executed - 2 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]),
             dim=1,
         ) * (self.cfg.action_scale**2)
-        # Penalize actions that exceed a soft limit with a steep quartic cost.
-        action_overshoot = torch.relu(torch.abs(self._actions) - self.cfg.action_soft_limit)
-        rew_action_over_limit = torch.sum(torch.pow(action_overshoot, 4), dim=1)
+        raw_low_violation = torch.relu(self._action_low - self._actions_raw_policy)
+        raw_high_violation = torch.relu(self._actions_raw_policy - self._action_high)
+        action_violation = raw_low_violation + raw_high_violation
+        rew_action_over_limit = torch.sum(torch.pow(action_violation, self.cfg.action_over_limit_power), dim=1)
 
-        self._episode_mean_action_abs_sum += torch.mean(torch.abs(self._actions), dim=1)
+        self._episode_mean_action_abs_sum += torch.mean(torch.abs(self._actions_executed), dim=1)
         self._episode_action_count += 1
 
         # penalize non-vertical orientation (projected gravity on xy plane)
@@ -418,7 +548,7 @@ class Go2PendulumEnv(DirectRLEnv):
         rew_torque = torch.sum(torch.square(self.robot.data.applied_torque[:, self._leg_dof_ids]), dim=1)
 
         self.last_actions = torch.roll(self.last_actions, 1, 2)
-        self.last_actions[:, :, 0] = self._actions[:]
+        self.last_actions[:, :, 0] = self._actions_executed[:]
 
         # gait shaping
         self._step_contact_targets()
@@ -593,9 +723,25 @@ class Go2PendulumEnv(DirectRLEnv):
             # Spread out the resets to avoid spikes in training when many environments reset at a similar time.
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
 
-        self._actions[env_ids] = 0.0
-        self._actions_clipped[env_ids] = 0.0
+        self._actions_raw_policy[env_ids] = 0.0
+        self._actions_bounded[env_ids] = 0.0
+        self._actions_delayed[env_ids] = 0.0
+        self._actions_filtered[env_ids] = 0.0
+        self._actions_executed[env_ids] = 0.0
         self._previous_actions[env_ids] = 0.0
+        self._processed_actions[env_ids] = 0.0
+        self._action_delay_buffer[env_ids] = 0.0
+        if self.cfg.enable_action_delay:
+            if self.cfg.action_delay_randomize_per_reset:
+                self._action_delay_steps[env_ids] = torch.randint(
+                    self.cfg.action_delay_steps_min,
+                    self.cfg.action_delay_steps_max + 1,
+                    (env_ids.shape[0],),
+                    device=self.device,
+                    dtype=torch.long,
+                )
+            else:
+                self._action_delay_steps[env_ids] = self.cfg.action_delay_steps_max
 
         # Reset variables.
         self._steps_since_reset[env_ids] = 0
@@ -637,6 +783,7 @@ class Go2PendulumEnv(DirectRLEnv):
         # Reset robot state.
         joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
         joint_vel = self.robot.data.default_joint_vel[env_ids].clone()
+        self.desired_joint_pos[env_ids] = joint_pos[:, self._leg_dof_ids]
 
         if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
             for joint_idx in self._pendulum_dof_ids.tolist():
