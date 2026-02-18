@@ -92,7 +92,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
         # Joint position command (deviation from default joint positions).
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
-        self._actions_tanh = torch.zeros_like(self._actions)
+        self._actions_clipped = torch.zeros_like(self._actions)
         self._previous_actions = torch.zeros(
             self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device
         )
@@ -116,6 +116,7 @@ class Go2PendulumEnv(DirectRLEnv):
             "pendulum_velocity",
             "balanced_movement",
             "rew_action_rate",
+            "action_over_limit",
             "torque",
             "orient",
             "base_height",
@@ -138,6 +139,8 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_pendulum_angle_deg_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._episode_pendulum_speed_deg_s_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self._episode_pendulum_speed_deg_s_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._episode_mean_action_abs_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        self._episode_action_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._prev_position_error = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
 
         self.last_actions = torch.zeros(
@@ -164,6 +167,7 @@ class Go2PendulumEnv(DirectRLEnv):
         self._pendulum_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._pendulum_angle_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._position_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self._base_height_failure_steps = None
         self._pendulum_angle_failure_steps = None
         self._position_failure_steps = None
         self._steps_since_reset = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
@@ -205,8 +209,11 @@ class Go2PendulumEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self._actions = actions.clone()
-        self._actions_tanh = torch.tanh(self._actions)
-        self._processed_actions = self.cfg.action_scale * self._actions_tanh
+        if self.cfg.enable_action_clipping:
+            self._actions_clipped = torch.clamp(self._actions, -self.cfg.action_clip, self.cfg.action_clip)
+        else:
+            self._actions_clipped = self._actions.clone()
+        self._processed_actions = self.cfg.action_scale * self._actions_clipped
 
         self.desired_joint_pos = (
             self.robot.data.default_joint_pos[:, self._leg_dof_ids] + self._processed_actions
@@ -295,7 +302,7 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_vel,
         ]
 
-        policy_tensors.extend([self._actions_tanh, self.clock_inputs])
+        policy_tensors.extend([self._actions_clipped, self.clock_inputs])
 
         observations = {"policy": torch.cat(policy_tensors, dim=-1)}
         return observations
@@ -341,6 +348,12 @@ class Go2PendulumEnv(DirectRLEnv):
             torch.square(self._actions - 2 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]),
             dim=1,
         ) * (self.cfg.action_scale**2)
+        # Penalize actions that exceed a soft limit with a steep quartic cost.
+        action_overshoot = torch.relu(torch.abs(self._actions) - self.cfg.action_soft_limit)
+        rew_action_over_limit = torch.sum(torch.pow(action_overshoot, 4), dim=1)
+
+        self._episode_mean_action_abs_sum += torch.mean(torch.abs(self._actions), dim=1)
+        self._episode_action_count += 1
 
         # penalize non-vertical orientation (projected gravity on xy plane)
         rew_orient = torch.sum(
@@ -454,6 +467,7 @@ class Go2PendulumEnv(DirectRLEnv):
             "pendulum_velocity": pendulum_velocity_reward * self.cfg.pendulum_vel_reward_scale,
             "balanced_movement": balanced_movement_reward * self.cfg.balanced_movement_reward_scale,
             "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
+            "action_over_limit": rew_action_over_limit * self.cfg.action_over_limit_reward_scale,
             "torque": rew_torque * self.cfg.torque_reward_scale,
             "orient": rew_orient * self.cfg.orient_reward_scale,
             "base_height": base_height_reward * self.cfg.base_height_reward_scale,
@@ -500,8 +514,16 @@ class Go2PendulumEnv(DirectRLEnv):
         terminated = cstr_termination_contacts
 
         base_height = self.robot.data.root_pos_w[:, 2]
-        # print(base_height)
-        cstr_base_height_min = (base_height < self.cfg.base_height_min) & termination_allowed
+        if self._base_height_failure_steps is None:
+            self._base_height_failure_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        base_height_failing = (base_height < self.cfg.base_height_min) & termination_allowed
+        self._base_height_failure_steps = torch.where(
+            base_height_failing,
+            self._base_height_failure_steps + 1,
+            torch.zeros_like(self._base_height_failure_steps),
+        )
+        base_height_failure_threshold = max(1, math.ceil(self.cfg.base_height_terminate_duration_s / self.step_dt))
+        cstr_base_height_min = self._base_height_failure_steps >= base_height_failure_threshold
         terminated = terminated | cstr_base_height_min
 
         pendulum_contact = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -572,13 +594,15 @@ class Go2PendulumEnv(DirectRLEnv):
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
 
         self._actions[env_ids] = 0.0
-        self._actions_tanh[env_ids] = 0.0
+        self._actions_clipped[env_ids] = 0.0
         self._previous_actions[env_ids] = 0.0
 
         # Reset variables.
         self._steps_since_reset[env_ids] = 0
         self.last_actions[env_ids] = 0
         self.gait_indices[env_ids] = 0
+        if self._base_height_failure_steps is not None:
+            self._base_height_failure_steps[env_ids] = 0
         if self._pendulum_angle_failure_steps is not None:
             self._pendulum_angle_failure_steps[env_ids] = 0
         if self._position_failure_steps is not None:
@@ -685,6 +709,11 @@ class Go2PendulumEnv(DirectRLEnv):
         extras["Episode_Metric/mean_pendulum_speed_deg_s"] = mean_pendulum_speed_deg_s.item()
         self._episode_pendulum_speed_deg_s_sum[env_ids] = 0.0
         self._episode_pendulum_speed_deg_s_count[env_ids] = 0
+        action_steps = torch.clamp(self._episode_action_count[env_ids], min=1).to(dtype=torch.float)
+        mean_action_abs = torch.mean(self._episode_mean_action_abs_sum[env_ids] / action_steps)
+        extras["Episode_Metric/mean_action_abs"] = mean_action_abs.item()
+        self._episode_mean_action_abs_sum[env_ids] = 0.0
+        self._episode_action_count[env_ids] = 0
         self.extras["log"].update(extras)
 
     def _set_debug_vis_impl(self, debug_vis: bool):

@@ -6,8 +6,6 @@
 import math
 import os
 
-from numpy import True_
-
 from isaaclab.actuators import DCMotorCfg
 
 import isaaclab.sim as sim_utils
@@ -70,85 +68,86 @@ GO2_PENDULUM_CFG = ArticulationCfg(
 
 @configclass
 class Go2PendulumEnvCfg(DirectRLEnvCfg):
-    # env
+    # Core environment interface.
     decimation = 4
     episode_length_s = 12
-    # - spaces definition
-    action_scale = 0.25
     action_space = 12
+    action_scale = 0.25
+    enable_action_clipping = False
+    action_clip = 1.0
     observation_space = 48 + 4 + 4
     state_space = 0
     debug_vis = True
     use_pendulum = True
     track_goal = False
 
-    # gait shaping
-    feet_clearance_reward_scale = -2.0
-    tracking_contacts_shaped_force_reward_scale = 0.5
+    # Initial conditions (reset sampling).
+    # - Goal target sampling in the environment frame.
+    goal_randomization_dist_min = 0.0
+    goal_randomization_dist_max = 0.5
+    goal_randomization_angle_min = math.radians(0)
+    goal_randomization_angle_max = math.radians(360)
+    goal_yaw_randomization_min = math.radians(0)
+    goal_yaw_randomization_max = math.radians(0)
 
-    # torque regularization
-    torque_reward_scale = -0.0002
+    # - Pendulum reset angle sampling.
+    pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
+    pendulum_angle_min = math.radians(0.0)
+    pendulum_angle_max = math.radians(0.5)
 
-    # early stopping / termination
-    termination_grace_s = 2.0
+    # Termination conditions.
+    termination_grace_s = 0.1
     base_contact_grace_s = 0.5
-    base_height_min = 0.25
+    base_height_min = 0.28
+    base_height_terminate_duration_s = 0.1
 
-    base_height_target = 0.35
-    base_height_reward_sigma = 0.06
-    
-    termination_penalty = -100.0
     pendulum_contact_force_threshold = 1.0
+    pendulum_terminate_angle_rad = math.radians(9.0)
+    pendulum_terminate_duration_s = 0.1
 
-    # 20 reward -> 0.4
-    position_reward_scale = 0.6
+    position_tolerance = 0.1
+    position_terminate_duration_s = 15.0
+    termination_penalty = -500.0
+
+    # Position tracking and heading alignment.
+    position_reward_scale = 0.4
     position_reward_sigma = 0.6
     progress_reward_scale = 100.0
-
     yaw_alignment_reward_scale = 0.3
     yaw_alignment_reward_sigma = 0.2
 
-    action_rate_reward_scale = -0.01
-    feet_air_time_reward_scale = 0.01
+    # Pendulum/balance rewards.
+    pendulum_upright_reward_scale = 0.4
+    pendulum_upright_reward_sigma = math.radians(12)
+    pendulum_vel_reward_scale = -2.0
+    pendulum_vel_reward_sigma = 0.05  # unused with squared-velocity penalty
+    balanced_movement_reward_scale = 0.2
+
+    # Quadruped motion regularization and gait shaping.
+    feet_clearance_reward_scale = -20.0
+    tracking_contacts_shaped_force_reward_scale = 1.0
+    feet_air_time_reward_scale = 0.1
+    action_rate_reward_scale = -0.0001
+    action_soft_limit = 2.0
+    action_over_limit_reward_scale = 0.0
+    torque_reward_scale = -0.0001
     orient_reward_scale = 0.1
     lin_vel_z_reward_scale = -2.0
     dof_vel_reward_scale = -0.003
     dof_acc_reward_scale = -2.5e-7
-    ang_vel_xy_reward_scale = -0.1
+    ang_vel_xy_reward_scale = -0.01
     undesired_contact_reward_scale = -1.0
+    # Base-height shaping reward (separate from base-height termination above).
+    base_height_target = 0.35
+    base_height_reward_sigma = 0.06
     base_height_reward_scale = 0.1
-
-    pendulum_upright_reward_scale = 0.6
-    pendulum_upright_reward_sigma = math.radians(10)
-
-    pendulum_vel_reward_scale = -2.0
-    pendulum_vel_reward_sigma = 0.05  # unused with squared-velocity penalty
-    
-    balanced_movement_reward_scale = 0.2
-
-    # target randomization
-    goal_randomization_dist_min = 0.6
-    goal_randomization_dist_max = 0.8
-    goal_randomization_angle_min = math.radians(0)
-    goal_randomization_angle_max = math.radians(360)
-    goal_yaw_randomization_min = math.radians(0)
-    goal_yaw_randomization_max = math.radians(360)
-    position_tolerance = 0.1
-    position_terminate_duration_s = 15.0
 
     # observation noise (applied to x/y/yaw target error terms only)
     observation_noise_scale = 1.0
     position_noise = 0.02  # meters
     orientation_noise = math.radians(1.0)  # radians
 
-    # pendulum setup
-    pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
-    pendulum_angle_min = math.radians(0.0)
-    pendulum_angle_max = math.radians(9.9)
-    pendulum_terminate_angle_rad = math.radians(9.0)
-    pendulum_terminate_duration_s = 2.0
-
-    # simulation
+    # Simulation and scene.
     sim: SimulationCfg = SimulationCfg(
         dt=1 / 200,
         render_interval=decimation,
