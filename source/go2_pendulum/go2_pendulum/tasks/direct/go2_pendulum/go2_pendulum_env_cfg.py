@@ -75,16 +75,98 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     action_scale = 0.25
     enable_action_clipping = False
     action_clip = 1.0
+    enable_action_lpf = True
+    action_lpf_cutoff_hz = 8.0
+    enable_action_delay = True
+    action_delay_steps_min = 0
+    action_delay_steps_max = 2
+    action_delay_randomize_per_reset = True
+    enable_per_joint_action_bounds = True
+    action_bound_margin = 1.0
+    enable_desired_joint_pos_hard_clamp = True
+    action_over_limit_power = 2.0
     observation_space = 48 + 4 + 4
     state_space = 0
     debug_vis = True
     use_pendulum = True
     track_goal = False
 
+    # Domain randomization.
+    enable_domain_randomization = False
+    dr_seed_offset = 0
+
+    # Material randomization (robot only).
+    enable_material_randomization = True
+    material_randomize_on_reset = True
+    material_randomization_prob = 1.0
+    material_num_buckets = 64
+    material_static_friction_range = (0.5, 1.25)
+    material_dynamic_friction_range = (0.4, 1.1)
+    material_restitution_range = (0.0, 0.05)
+    material_make_consistent = True
+
+    # Base mass / center-of-mass randomization.
+    enable_mass_randomization = True
+    mass_randomize_body_name = "base"
+    mass_scale_range = (0.85, 1.15)
+    mass_recompute_inertia = True
+    enable_com_randomization = True
+    com_offset_x_range = (-0.015, 0.015)
+    com_offset_y_range = (-0.015, 0.015)
+    com_offset_z_range = (-0.01, 0.01)
+
+    # Motor gain randomization (PD gain scaling).
+    enable_motor_gain_randomization = True
+    motor_gain_actuator_name = "base_legs"
+    motor_stiffness_scale_range = (0.8, 1.2)
+    motor_damping_scale_range = (0.8, 1.2)
+    motor_gain_per_joint = False
+
+    # Proprioceptive observation delay / jitter.
+    enable_obs_delay = True
+    obs_delay_steps_min = 0
+    obs_delay_steps_max = 1
+    obs_delay_randomize_per_reset = True
+    obs_delay_jitter_prob = 0.1
+    obs_delay_jitter_extra_max = 1
+    obs_delay_proprio_only = True
+
+    # Sensor bias and drift randomization.
+    enable_sensor_bias_drift = True
+    imu_lin_vel_bias_range = 0.05
+    imu_ang_vel_bias_range = math.radians(3.0)
+    imu_gravity_bias_range = 0.03
+    imu_lin_vel_drift_std_per_s = 0.01
+    imu_ang_vel_drift_std_per_s = math.radians(0.5)
+    imu_gravity_drift_std_per_s = 0.005
+    encoder_joint_pos_bias_range = math.radians(1.5)
+    encoder_joint_vel_bias_range = math.radians(6.0)
+    encoder_pendulum_pos_bias_range = math.radians(0.8)
+    encoder_pendulum_vel_bias_range = math.radians(4.0)
+    encoder_joint_pos_drift_std_per_s = math.radians(0.2)
+    encoder_joint_vel_drift_std_per_s = math.radians(1.0)
+    encoder_pendulum_pos_drift_std_per_s = math.radians(0.1)
+    encoder_pendulum_vel_drift_std_per_s = math.radians(0.5)
+
+    # External wrench pushes.
+    enable_external_wrench_push = True
+    push_body_name = "base"
+    push_is_global = True
+    push_interval_s_min = 2.0
+    push_interval_s_max = 5.0
+    push_duration_s_min = 0.05
+    push_duration_s_max = 0.15
+    push_force_x_range = (-25.0, 25.0)
+    push_force_y_range = (-25.0, 25.0)
+    push_force_z_range = (0.0, 0.0)
+    push_torque_x_range = (0.0, 0.0)
+    push_torque_y_range = (0.0, 0.0)
+    push_torque_z_range = (-3.0, 3.0)
+
     # Initial conditions (reset sampling).
     # - Goal target sampling in the environment frame.
-    goal_randomization_dist_min = 0.0
-    goal_randomization_dist_max = 0.5
+    goal_randomization_dist_min = 0.5
+    goal_randomization_dist_max = 0.6
     goal_randomization_angle_min = math.radians(0)
     goal_randomization_angle_max = math.radians(360)
     goal_yaw_randomization_min = math.radians(-30)
@@ -93,11 +175,16 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # - Pendulum reset angle sampling.
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
     pendulum_angle_min = math.radians(0.0)
+<<<<<<< HEAD
     pendulum_angle_max = math.radians(9.9)
+=======
+    pendulum_angle_max = math.radians(9.0)
+>>>>>>> refs/remotes/origin/domain_randomization
 
     # Termination conditions.
     termination_grace_s = 0.1
     base_contact_grace_s = 0.5
+<<<<<<< HEAD
     base_height_min = -10.0 #0.3
     base_height_terminate_duration_s = 0.1
 
@@ -107,19 +194,35 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     position_tolerance = 0.1
     position_terminate_duration_s = 12.0
+=======
+    base_height_min = 0.2
+    base_height_terminate_duration_s = 10.0
+
+    pendulum_contact_force_threshold = 1.0
+    pendulum_terminate_angle_rad = math.radians(9.0)
+    pendulum_terminate_duration_s = 10.0
+
+    position_tolerance = 0.1
+    position_terminate_duration_s = 25.0
+>>>>>>> refs/remotes/origin/domain_randomization
     termination_penalty = -500.0
 
     # Position tracking and heading alignment.
-    position_reward_scale = 0.4
-    position_reward_sigma = 0.6
+    position_reward_scale = 0.2
+    position_reward_sigma = 0.3
     progress_reward_scale = 100.0
     yaw_alignment_reward_scale = 0.3
     yaw_alignment_reward_sigma = 0.2
 
     # Pendulum/balance rewards.
     pendulum_upright_reward_scale = 0.4
+<<<<<<< HEAD
     pendulum_upright_reward_sigma = math.radians(12)
     pendulum_vel_reward_scale = -0.5
+=======
+    pendulum_upright_reward_sigma = 0.052
+    pendulum_vel_reward_scale = -0.05
+>>>>>>> refs/remotes/origin/domain_randomization
     pendulum_vel_reward_sigma = 0.05  # unused with squared-velocity penalty
     balanced_movement_reward_scale = 0.1
 
@@ -139,7 +242,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     undesired_contact_reward_scale = -1.0
     # Base-height shaping reward (separate from base-height termination above).
     base_height_target = 0.35
-    base_height_reward_sigma = 0.06
+    base_height_reward_sigma = 0.1
     base_height_reward_scale = 0.1
 
     # Observation noise.
