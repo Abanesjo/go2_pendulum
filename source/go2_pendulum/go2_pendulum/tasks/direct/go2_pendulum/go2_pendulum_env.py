@@ -211,7 +211,9 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_pendulum_angle_deg_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._episode_pendulum_speed_deg_s_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self._episode_pendulum_speed_deg_s_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
-        self._episode_mean_action_abs_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        self._episode_mean_action_constraint_violation_abs_sum = torch.zeros(
+            self.num_envs, dtype=torch.float, device=self.device
+        )
         self._episode_action_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._prev_position_error = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
 
@@ -929,7 +931,7 @@ class Go2PendulumEnv(DirectRLEnv):
             else:
                 yaw_error = math_utils.wrap_to_pi(self.target_state[:, 2] - yaw)
             position_sigma = max(self.cfg.position_reward_sigma, 1e-6)
-            position_tracking_reward = 1.0 - (position_error / position_sigma)
+            position_tracking_reward = torch.exp(-(position_error / position_sigma))
             rew_progress = self._prev_position_error - position_error
             self._prev_position_error = position_error.clone()
             yaw_sigma = max(self.cfg.yaw_alignment_reward_sigma, 1e-6)
@@ -961,7 +963,7 @@ class Go2PendulumEnv(DirectRLEnv):
         action_violation = raw_low_violation + raw_high_violation
         rew_action_over_limit = torch.sum(torch.pow(action_violation, self.cfg.action_over_limit_power), dim=1)
 
-        self._episode_mean_action_abs_sum += torch.mean(torch.abs(self._actions_executed), dim=1)
+        self._episode_mean_action_constraint_violation_abs_sum += torch.mean(torch.abs(action_violation), dim=1)
         self._episode_action_count += 1
 
         # penalize non-vertical orientation (projected gravity on xy plane)
@@ -1000,7 +1002,7 @@ class Go2PendulumEnv(DirectRLEnv):
             # Same spirit as base orient reward: penalize tilt of the frame z-axis in xy without angle conversions.
             pendulum_upright_error = torch.sum(torch.square(pendulum_ee_z_w[:, :2]), dim=1)
             pendulum_upright_sigma = max(self.cfg.pendulum_upright_reward_sigma, 1e-6)
-            pendulum_upright_reward = 1.0 - (pendulum_upright_error / pendulum_upright_sigma)
+            pendulum_upright_reward = torch.exp(-(pendulum_upright_error / pendulum_upright_sigma))
 
             pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
             pendulum_vel_norm = torch.linalg.norm(pendulum_joint_vel, dim=1)
@@ -1359,9 +1361,11 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_pendulum_speed_deg_s_sum[env_ids] = 0.0
         self._episode_pendulum_speed_deg_s_count[env_ids] = 0
         action_steps = torch.clamp(self._episode_action_count[env_ids], min=1).to(dtype=torch.float)
-        mean_action_abs = torch.mean(self._episode_mean_action_abs_sum[env_ids] / action_steps)
-        extras["Episode_Metric/mean_action_abs"] = mean_action_abs.item()
-        self._episode_mean_action_abs_sum[env_ids] = 0.0
+        mean_action_constraint_violation_abs = torch.mean(
+            self._episode_mean_action_constraint_violation_abs_sum[env_ids] / action_steps
+        )
+        extras["Episode_Metric/mean_action_constraint_violation_abs"] = mean_action_constraint_violation_abs.item()
+        self._episode_mean_action_constraint_violation_abs_sum[env_ids] = 0.0
         self._episode_action_count[env_ids] = 0
         self.extras["log"].update(extras)
 
