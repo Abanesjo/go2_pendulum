@@ -175,26 +175,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # - Pendulum reset angle sampling.
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
     pendulum_angle_min = math.radians(0.0)
-<<<<<<< HEAD
     pendulum_angle_max = math.radians(9.9)
-=======
-    pendulum_angle_max = math.radians(9.0)
->>>>>>> refs/remotes/origin/domain_randomization
 
     # Termination conditions.
     termination_grace_s = 0.1
     base_contact_grace_s = 0.5
-<<<<<<< HEAD
-    base_height_min = -10.0 #0.3
-    base_height_terminate_duration_s = 0.1
-
-    pendulum_contact_force_threshold = 1.0
-    pendulum_terminate_angle_rad = math.radians(9.0)
-    pendulum_terminate_duration_s = 3.0
-
-    position_tolerance = 0.1
-    position_terminate_duration_s = 12.0
-=======
     base_height_min = 0.2
     base_height_terminate_duration_s = 10.0
 
@@ -204,7 +189,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     position_tolerance = 0.1
     position_terminate_duration_s = 25.0
->>>>>>> refs/remotes/origin/domain_randomization
     termination_penalty = -500.0
 
     # Position tracking and heading alignment.
@@ -216,13 +200,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # Pendulum/balance rewards.
     pendulum_upright_reward_scale = 0.4
-<<<<<<< HEAD
-    pendulum_upright_reward_sigma = math.radians(12)
-    pendulum_vel_reward_scale = -0.5
-=======
     pendulum_upright_reward_sigma = 0.052
     pendulum_vel_reward_scale = -0.05
->>>>>>> refs/remotes/origin/domain_randomization
     pendulum_vel_reward_sigma = 0.05  # unused with squared-velocity penalty
     balanced_movement_reward_scale = 0.1
 

@@ -805,15 +805,6 @@ class Go2PendulumEnv(DirectRLEnv):
 
         body_lin_vel_b = self.robot.data.root_lin_vel_b.clone()
         body_ang_vel_b = self.robot.data.root_ang_vel_b.clone()
-<<<<<<< HEAD
-
-        body_lin_vel_noise = self.cfg.body_lin_vel_noise * self.cfg.observation_noise_scale
-        body_ang_vel_noise = self.cfg.body_ang_vel_noise * self.cfg.observation_noise_scale
-        position_noise = self.cfg.position_noise * self.cfg.observation_noise_scale
-        orientation_noise = self.cfg.orientation_noise * self.cfg.observation_noise_scale
-        pendulum_joint_pos_noise = self.cfg.pendulum_joint_pos_noise * self.cfg.observation_noise_scale
-        pendulum_joint_vel_noise = self.cfg.pendulum_joint_vel_noise * self.cfg.observation_noise_scale
-=======
         projected_gravity_b = self.robot.data.projected_gravity_b.clone()
 
         self._update_sensor_bias_drift()
@@ -834,7 +825,6 @@ class Go2PendulumEnv(DirectRLEnv):
         orientation_noise = self.cfg.orientation_noise * obs_noise_scale
         pendulum_joint_pos_noise = self.cfg.pendulum_joint_pos_noise * obs_noise_scale
         pendulum_joint_vel_noise = self.cfg.pendulum_joint_vel_noise * obs_noise_scale
->>>>>>> refs/remotes/origin/domain_randomization
 
         if body_lin_vel_noise > 0.0:
             body_lin_vel_b = body_lin_vel_b + sample_uniform(
@@ -881,18 +871,6 @@ class Go2PendulumEnv(DirectRLEnv):
                 )
         state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
 
-<<<<<<< HEAD
-        policy_tensors = [
-            body_lin_vel_b,
-            body_ang_vel_b,
-            self.robot.data.projected_gravity_b,
-            state_error,
-            leg_joint_pos,
-            leg_joint_vel,
-            pendulum_joint_pos,
-            pendulum_joint_vel,
-        ]
-=======
         proprio_block = torch.cat(
             [
                 body_lin_vel_b,
@@ -922,7 +900,6 @@ class Go2PendulumEnv(DirectRLEnv):
         delayed_pendulum_joint_pos = proprio_block[:, idx4:idx5]
         delayed_pendulum_joint_vel = proprio_block[:, idx5:idx6]
         delayed_actions = proprio_block[:, idx6:]
->>>>>>> refs/remotes/origin/domain_randomization
 
         policy_tensors = [
             delayed_body_lin_vel,
