@@ -187,6 +187,7 @@ class Go2PendulumEnv(DirectRLEnv):
             "pendulum_upright",
             "pendulum_velocity",
             "balanced_movement",
+            "action_magnitude",
             "rew_action_rate",
             "action_over_limit",
             "torque",
@@ -949,6 +950,10 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_base_height_sum += base_height
         self._episode_base_height_count += 1
 
+        rew_action_magnitude = torch.sum(
+            torch.square(self._actions_executed), dim=1
+        ) * (self.cfg.action_scale**2)
+
         rew_action_rate = torch.sum(
             torch.square(self._actions_executed - self.last_actions[:, :, 0]),
             dim=1,
@@ -1077,6 +1082,7 @@ class Go2PendulumEnv(DirectRLEnv):
             "pendulum_upright": pendulum_upright_reward * self.cfg.pendulum_upright_reward_scale,
             "pendulum_velocity": pendulum_velocity_reward * self.cfg.pendulum_vel_reward_scale,
             "balanced_movement": balanced_movement_reward * self.cfg.balanced_movement_reward_scale,
+            "action_magnitude": rew_action_magnitude * self.cfg.action_magnitude_reward_scale,
             "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
             "action_over_limit": rew_action_over_limit * self.cfg.action_over_limit_reward_scale,
             "torque": rew_torque * self.cfg.torque_reward_scale,

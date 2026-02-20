@@ -59,7 +59,7 @@ GO2_PENDULUM_CFG = ArticulationCfg(
             saturation_effort=23.5,
             velocity_limit=30.0,
             stiffness=25.0,
-            damping=0.5,
+            damping=0.6,
             friction=0.0,
         ),
     },
@@ -89,7 +89,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     state_space = 0
     debug_vis = True
     use_pendulum = True
-    track_goal = False
+    track_goal = True
 
     # Domain randomization.
     enable_domain_randomization = False
@@ -149,7 +149,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     encoder_pendulum_vel_drift_std_per_s = math.radians(0.5)
 
     # External wrench pushes.
-    enable_external_wrench_push = True
+    enable_external_wrench_push = False
     push_body_name = "base"
     push_is_global = True
     push_interval_s_min = 2.0
@@ -169,23 +169,37 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     goal_randomization_dist_max = 0.6
     goal_randomization_angle_min = math.radians(0)
     goal_randomization_angle_max = math.radians(360)
-    goal_yaw_randomization_min = math.radians(-30)
-    goal_yaw_randomization_max = math.radians(30)
+    if enable_domain_randomization:
+        goal_yaw_randomization_min = math.radians(-30)
+        goal_yaw_randomization_max = math.radians(30)
+    else:
+        goal_yaw_randomization_min = math.radians(0)
+        goal_yaw_randomization_max = math.radians(0)
 
     # - Pendulum reset angle sampling.
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
     pendulum_angle_min = math.radians(0.0)
-    pendulum_angle_max = math.radians(9.9)
+    if enable_domain_randomization:
+        pendulum_angle_max = math.radians(0.5)
+    else:
+        pendulum_angle_max = math.radians(9.9)
+    
 
     # Termination conditions.
     termination_grace_s = 0.1
     base_contact_grace_s = 0.5
-    base_height_min = 0.2
-    base_height_terminate_duration_s = 10.0
+    base_height_min = 0.15
+    base_height_terminate_duration_s = 25.0
 
     pendulum_contact_force_threshold = 1.0
-    pendulum_terminate_angle_rad = math.radians(9.0)
-    pendulum_terminate_duration_s = 10.0
+
+    if enable_domain_randomization:
+        pendulum_terminate_angle_rad = math.radians(5.0)
+    else:
+        pendulum_terminate_angle_rad = math.radians(15)
+    
+    pendulum_terminate_duration_s = 5.0
+    
 
     position_tolerance = 0.1
     position_terminate_duration_s = 25.0
@@ -209,6 +223,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     feet_clearance_reward_scale = -20.0
     tracking_contacts_shaped_force_reward_scale = 1.0
     feet_air_time_reward_scale = 0.1
+    action_magnitude_reward_scale = -0.001
     action_rate_reward_scale = -0.0001
     action_soft_limit = 2.0
     action_over_limit_reward_scale = -0.01
@@ -222,7 +237,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Base-height shaping reward (separate from base-height termination above).
     base_height_target = 0.35
     base_height_reward_sigma = 0.1
-    base_height_reward_scale = 0.1
+    base_height_reward_scale = 0.5
 
     # Observation noise.
     observation_noise_scale = 1.0
