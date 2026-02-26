@@ -167,8 +167,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # - Goal target sampling in the environment frame.
     goal_randomization_dist_min = 0.5
     goal_randomization_dist_max = 0.6
-    goal_randomization_angle_min = math.radians(0)
-    goal_randomization_angle_max = math.radians(360)
+    goal_randomization_angle_min = math.radians(-30)
+    goal_randomization_angle_max = math.radians(30)
     if enable_domain_randomization:
         goal_yaw_randomization_min = math.radians(-30)
         goal_yaw_randomization_max = math.radians(30)
