@@ -182,7 +182,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     if enable_domain_randomization:
         pendulum_angle_max = math.radians(9.9)
     else:
-        pendulum_angle_max = math.radians(0.5)
+        pendulum_angle_max = math.radians(5.0)
     
 
     # Termination conditions.
