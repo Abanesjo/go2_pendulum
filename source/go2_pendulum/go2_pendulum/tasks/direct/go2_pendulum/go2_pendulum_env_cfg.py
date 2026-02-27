@@ -89,7 +89,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     state_space = 0
     debug_vis = True
     use_pendulum = True
-    track_goal = True
+    track_goal = False
 
     # Domain randomization.
     enable_domain_randomization = False
@@ -189,7 +189,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     termination_grace_s = 0.1
     base_contact_grace_s = 0.5
     base_height_min = 0.15
-    base_height_terminate_duration_s = 25.0
+    base_height_terminate_duration_s = 10.0
 
     pendulum_contact_force_threshold = 1.0
 
@@ -200,9 +200,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     
     pendulum_terminate_duration_s = 5.0
     
-
-    position_tolerance = 0.1
-    position_terminate_duration_s = 25.0
+    if enable_domain_randomization:
+        position_tolerance = 0.1
+    else:
+        position_tolerance = 5.0
+    position_terminate_duration_s = 15.0
     termination_penalty = -500.0
 
     # Position tracking and heading alignment.
