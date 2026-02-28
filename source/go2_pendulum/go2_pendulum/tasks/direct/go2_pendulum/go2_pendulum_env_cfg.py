@@ -90,6 +90,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     debug_vis = True
     use_pendulum = True
     track_goal = False
+    # difficulty_level = 1
+    difficulty_level = 2
 
     # Domain randomization.
     enable_domain_randomization = False
@@ -165,8 +167,14 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # Initial conditions (reset sampling).
     # - Goal target sampling in the environment frame.
-    goal_randomization_dist_min = 0.0
-    goal_randomization_dist_max = 0.3
+    if difficulty_level == 1:
+        goal_randomization_dist_min = 0.0
+        goal_randomization_dist_max = 0.3
+
+    elif difficulty_level == 2:
+        goal_randomization_dist_min = 0.3
+        goal_randomization_dist_max = 0.4
+    
     if track_goal:
         goal_randomization_angle_min = math.radians(-30)
         goal_randomization_angle_max = math.radians(30)
@@ -174,19 +182,21 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
         goal_randomization_angle_min = math.radians(0)
         goal_randomization_angle_max = math.radians(360)
         
-    if enable_domain_randomization:
-        goal_yaw_randomization_min = math.radians(-30)
-        goal_yaw_randomization_max = math.radians(30)
-    else:
+    if difficulty_level== 1:
+        goal_yaw_randomization_min = math.radians(0)
+        goal_yaw_randomization_max = math.radians(0)
+    elif difficulty_level == 2:
         goal_yaw_randomization_min = math.radians(0)
         goal_yaw_randomization_max = math.radians(0)
 
     # - Pendulum reset angle sampling.
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
-    pendulum_angle_min = math.radians(0.0)
-    if enable_domain_randomization:
-        pendulum_angle_max = math.radians(9.9)
-    else:
+    
+    if difficulty_level == 1:
+        pendulum_angle_min = math.radians(0.0)
+        pendulum_angle_max = math.radians(5.0)
+    elif difficulty_level == 2:
+        pendulum_angle_min = math.radians(9.9)
         pendulum_angle_max = math.radians(9.9)
     
 
@@ -200,18 +210,19 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     base_tilt_terminate_angle_rad = math.radians(45.0)
     pendulum_contact_force_threshold = 1.0
 
-    if enable_domain_randomization:
+    if difficulty_level == 1:
+        pendulum_terminate_angle_rad = math.radians(15.0)
+    elif difficulty_level == 1:
         pendulum_terminate_angle_rad = math.radians(5.0)
-    else:
-        pendulum_terminate_angle_rad = math.radians(15)
     
     pendulum_terminate_duration_s = 5.0
     
-    if enable_domain_randomization:
-        position_tolerance = 0.1
-    else:
+    if difficulty_level == 1:
         position_tolerance = 5.0
+    elif difficulty_level == 2:
+        position_tolerance = 0.2
     position_terminate_duration_s = 15.0
+
     termination_penalty = -2000.0
 
     # Position tracking and heading alignment.
