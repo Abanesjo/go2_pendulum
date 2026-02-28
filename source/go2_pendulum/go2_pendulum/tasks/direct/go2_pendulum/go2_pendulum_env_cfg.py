@@ -173,7 +173,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     elif difficulty_level == 2:
         goal_randomization_dist_min = 0.0
-        goal_randomization_dist_max = 0.3
+        goal_randomization_dist_max = 0.0
     
     if track_goal:
         goal_randomization_angle_min = math.radians(-30)
@@ -204,7 +204,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     if difficulty_level == 1:
         termination_grace_s = 0.1
     elif difficulty_level == 2:
-        termination_grace_s = 5.0
+        termination_grace_s = 0.1
 
     base_contact_grace_s = 0.5
     base_height_min = 0.28
@@ -212,7 +212,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     if difficulty_level == 1:
         base_height_terminate_duration_s = 10.0
     elif difficulty_level == 2:
-        base_height_terminate_duration_s = 0.1
+        base_height_terminate_duration_s = 10.0
 
     #immediate terminations:
     base_tilt_terminate_angle_rad = math.radians(45.0)
@@ -221,17 +221,17 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     if difficulty_level == 1:
         pendulum_terminate_angle_rad = math.radians(15.0)
     elif difficulty_level == 2:
-        pendulum_terminate_angle_rad = math.radians(5.0)
+        pendulum_terminate_angle_rad = math.radians(15.0)
 
     if difficulty_level == 1:
         pendulum_terminate_duration_s = 5.0
     elif difficulty_level == 2:
-        pendulum_terminate_duration_s = 0.1
+        pendulum_terminate_duration_s = 5.0
     
     if difficulty_level == 1:
         position_tolerance = 5.0
     elif difficulty_level == 2:
-        position_tolerance = 0.2
+        position_tolerance = 5.0
     position_terminate_duration_s = 15.0
 
     termination_penalty = -500.0
@@ -259,16 +259,16 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     action_soft_limit = 2.0
     action_over_limit_reward_scale = -0.01
     torque_reward_scale = -0.0001
-    orient_reward_scale = 0.2
+    orient_reward_scale = 0.3
     lin_vel_z_reward_scale = -2.0
     dof_vel_reward_scale = -0.003
     dof_acc_reward_scale = -2.5e-7
     ang_vel_xy_reward_scale = -0.01
     undesired_contact_reward_scale = -1.0
     # Base-height shaping reward (separate from base-height termination above).
-    base_height_target = 0.35
+    base_height_target = 0.33
     base_height_reward_sigma = 0.1
-    base_height_reward_scale = 0.25
+    base_height_reward_scale = 0.2
 
     # Observation noise.
     observation_noise_scale = 1.0
