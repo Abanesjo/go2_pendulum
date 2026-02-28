@@ -208,7 +208,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     base_contact_grace_s = 0.5
     base_height_min = 0.28
-    base_height_terminate_duration_s = 10.0
+
+    if difficulty_level == 1:
+        base_height_terminate_duration_s = 10.0
+    elif difficulty_level == 2:
+        base_height_terminate_duration_s = 0.1
 
     #immediate terminations:
     base_tilt_terminate_angle_rad = math.radians(45.0)
