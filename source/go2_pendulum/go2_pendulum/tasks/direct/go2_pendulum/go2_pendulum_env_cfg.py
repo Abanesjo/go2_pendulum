@@ -165,10 +165,15 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # Initial conditions (reset sampling).
     # - Goal target sampling in the environment frame.
-    goal_randomization_dist_min = 0.5
-    goal_randomization_dist_max = 0.6
-    goal_randomization_angle_min = math.radians(-30)
-    goal_randomization_angle_max = math.radians(30)
+    goal_randomization_dist_min = 0.0
+    goal_randomization_dist_max = 0.3
+    if track_goal:
+        goal_randomization_angle_min = math.radians(-30)
+        goal_randomization_angle_max = math.radians(30)
+    else:  
+        goal_randomization_angle_min = math.radians(0)
+        goal_randomization_angle_max = math.radians(360)
+        
     if enable_domain_randomization:
         goal_yaw_randomization_min = math.radians(-30)
         goal_yaw_randomization_max = math.radians(30)
@@ -182,15 +187,17 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     if enable_domain_randomization:
         pendulum_angle_max = math.radians(9.9)
     else:
-        pendulum_angle_max = math.radians(5.0)
+        pendulum_angle_max = math.radians(9.9)
     
 
     # Termination conditions.
     termination_grace_s = 0.1
     base_contact_grace_s = 0.5
-    base_height_min = 0.15
+    base_height_min = 0.28
     base_height_terminate_duration_s = 10.0
 
+    #immediate terminations:
+    base_tilt_terminate_angle_rad = math.radians(45.0)
     pendulum_contact_force_threshold = 1.0
 
     if enable_domain_randomization:
@@ -205,10 +212,10 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     else:
         position_tolerance = 5.0
     position_terminate_duration_s = 15.0
-    termination_penalty = -500.0
+    termination_penalty = -2000.0
 
     # Position tracking and heading alignment.
-    position_reward_scale = 0.2
+    position_reward_scale = 0.4
     position_reward_sigma = 0.3
     progress_reward_scale = 100.0
     yaw_alignment_reward_scale = 0.3
@@ -225,7 +232,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     feet_clearance_reward_scale = -20.0
     tracking_contacts_shaped_force_reward_scale = 1.0
     feet_air_time_reward_scale = 0.1
-    action_magnitude_reward_scale = -0.05
+    action_magnitude_reward_scale = -0.1
     action_rate_reward_scale = -0.01
     action_soft_limit = 2.0
     action_over_limit_reward_scale = -0.01
@@ -239,7 +246,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Base-height shaping reward (separate from base-height termination above).
     base_height_target = 0.35
     base_height_reward_sigma = 0.1
-    base_height_reward_scale = 0.125
+    base_height_reward_scale = 0.25
 
     # Observation noise.
     observation_noise_scale = 1.0

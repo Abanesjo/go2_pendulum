@@ -208,6 +208,8 @@ class Go2PendulumEnv(DirectRLEnv):
         }
         self._episode_base_height_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self._episode_base_height_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._episode_base_tilt_deg_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        self._episode_base_tilt_deg_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._episode_pendulum_angle_deg_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self._episode_pendulum_angle_deg_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._episode_pendulum_speed_deg_s_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
@@ -240,6 +242,7 @@ class Go2PendulumEnv(DirectRLEnv):
         # Track termination causes for accurate logging.
         self._base_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._base_height_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self._base_tilt_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._pendulum_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._pendulum_angle_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._position_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -918,6 +921,10 @@ class Go2PendulumEnv(DirectRLEnv):
         observations = {"policy": torch.cat(policy_tensors, dim=-1)}
         return observations
 
+    def _compute_base_tilt_rad(self) -> torch.Tensor:
+        projected_gravity_b = self.robot.data.projected_gravity_b
+        return torch.atan2(torch.linalg.norm(projected_gravity_b[:, :2], dim=1), -projected_gravity_b[:, 2])
+
     def _get_rewards(self) -> torch.Tensor:
         env_origins = self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
         if self.target_state is not None:
@@ -949,6 +956,9 @@ class Go2PendulumEnv(DirectRLEnv):
         base_height_reward = torch.exp(-torch.square(base_height_error) / (sigma * sigma))
         self._episode_base_height_sum += base_height
         self._episode_base_height_count += 1
+        base_tilt_deg = torch.rad2deg(self._compute_base_tilt_rad())
+        self._episode_base_tilt_deg_sum += base_tilt_deg
+        self._episode_base_tilt_deg_count += 1
 
         rew_action_magnitude = torch.sum(
             torch.square(self._actions_executed), dim=1
@@ -1143,6 +1153,10 @@ class Go2PendulumEnv(DirectRLEnv):
         cstr_base_height_min = self._base_height_failure_steps >= base_height_failure_threshold
         terminated = terminated | cstr_base_height_min
 
+        base_tilt_rad = self._compute_base_tilt_rad()
+        base_tilt_terminated = base_tilt_rad > self.cfg.base_tilt_terminate_angle_rad
+        terminated = terminated | base_tilt_terminated
+
         pendulum_contact = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         if self.cfg.use_pendulum and self._pendulum_contact_sensor is not None:
             pendulum_contact_forces = self._pendulum_contact_sensor.data.net_forces_w
@@ -1190,6 +1204,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
         self._base_contact_terminated = cstr_termination_contacts
         self._base_height_terminated = cstr_base_height_min
+        self._base_tilt_terminated = base_tilt_terminated
         self._pendulum_contact_terminated = pendulum_contact
         self._pendulum_angle_terminated = pendulum_angle_terminated
         self._position_terminated = position_terminated
@@ -1332,18 +1347,21 @@ class Go2PendulumEnv(DirectRLEnv):
         extras = dict()
         base_contact_resets = self._base_contact_terminated[env_ids] & self.reset_terminated[env_ids]
         base_height_resets = self._base_height_terminated[env_ids] & self.reset_terminated[env_ids]
+        base_tilt_resets = self._base_tilt_terminated[env_ids] & self.reset_terminated[env_ids]
         pendulum_contact_resets = self._pendulum_contact_terminated[env_ids] & self.reset_terminated[env_ids]
         pendulum_angle_resets = self._pendulum_angle_terminated[env_ids] & self.reset_terminated[env_ids]
         position_resets = self._position_terminated[env_ids] & self.reset_terminated[env_ids]
         any_labeled_reset = (
             base_contact_resets
             | base_height_resets
+            | base_tilt_resets
             | pendulum_contact_resets
             | pendulum_angle_resets
             | position_resets
         )
         extras["Episode_Termination/base_contact"] = torch.count_nonzero(base_contact_resets).item()
         extras["Episode_Termination/base_height"] = torch.count_nonzero(base_height_resets).item()
+        extras["Episode_Termination/base_tilt"] = torch.count_nonzero(base_tilt_resets).item()
         extras["Episode_Termination/pendulum_contact"] = torch.count_nonzero(pendulum_contact_resets).item()
         extras["Episode_Termination/pendulum_angle"] = torch.count_nonzero(pendulum_angle_resets).item()
         extras["Episode_Termination/position_error"] = torch.count_nonzero(position_resets).item()
@@ -1356,6 +1374,11 @@ class Go2PendulumEnv(DirectRLEnv):
         extras["Episode_Metric/mean_base_height"] = mean_base_height.item()
         self._episode_base_height_sum[env_ids] = 0.0
         self._episode_base_height_count[env_ids] = 0
+        base_tilt_steps = torch.clamp(self._episode_base_tilt_deg_count[env_ids], min=1).to(dtype=torch.float)
+        mean_base_tilt_deg = torch.mean(self._episode_base_tilt_deg_sum[env_ids] / base_tilt_steps)
+        extras["Episode_Metric/mean_base_tilt_deg"] = mean_base_tilt_deg.item()
+        self._episode_base_tilt_deg_sum[env_ids] = 0.0
+        self._episode_base_tilt_deg_count[env_ids] = 0
         pendulum_steps = torch.clamp(self._episode_pendulum_angle_deg_count[env_ids], min=1).to(dtype=torch.float)
         mean_pendulum_angle_deg = torch.mean(self._episode_pendulum_angle_deg_sum[env_ids] / pendulum_steps)
         extras["Episode_Metric/mean_pendulum_angle_deg"] = mean_pendulum_angle_deg.item()
