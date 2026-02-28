@@ -169,7 +169,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # - Goal target sampling in the environment frame.
     if difficulty_level == 1:
         goal_randomization_dist_min = 0.0
-        goal_randomization_dist_max = 0.3
+        goal_randomization_dist_max = 0.0
 
     elif difficulty_level == 2:
         goal_randomization_dist_min = 0.0
@@ -230,7 +230,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
         position_tolerance = 0.2
     position_terminate_duration_s = 15.0
 
-    termination_penalty = -2000.0
+    termination_penalty = -500.0
 
     # Position tracking and heading alignment.
     position_reward_scale = 0.4
