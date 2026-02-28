@@ -91,7 +91,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     use_pendulum = True
     track_goal = False
     # difficulty_level = 1
-    difficulty_level = 2
+    # difficulty_level = 2
+    difficulty_level = 3
 
     # Domain randomization.
     enable_domain_randomization = False
@@ -174,6 +175,10 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     elif difficulty_level == 2:
         goal_randomization_dist_min = 0.0
         goal_randomization_dist_max = 0.0
+
+    elif difficulty_level == 3:
+        goal_randomization_dist_min = 0.0
+        goal_randomization_dist_max = 0.3
     
     if track_goal:
         goal_randomization_angle_min = math.radians(-30)
@@ -188,6 +193,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     elif difficulty_level == 2:
         goal_yaw_randomization_min = math.radians(0)
         goal_yaw_randomization_max = math.radians(0)
+    elif difficulty_level == 3:
+        goal_yaw_randomization_min = math.radians(0)
+        goal_yaw_randomization_max = math.radians(0)
 
     # - Pendulum reset angle sampling.
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
@@ -196,14 +204,19 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
         pendulum_angle_min = math.radians(0.0)
         pendulum_angle_max = math.radians(5.0)
     elif difficulty_level == 2:
+        pendulum_angle_min = math.radians(9.0)
+        pendulum_angle_max = math.radians(9.9)
+    elif difficulty_level == 3:
         pendulum_angle_min = math.radians(0.0)
-        pendulum_angle_max = math.radians(9.0)
+        pendulum_angle_max = math.radians(9.9)
     
 
     # Termination conditions.
     if difficulty_level == 1:
         termination_grace_s = 0.1
     elif difficulty_level == 2:
+        termination_grace_s = 0.1
+    elif difficulty_level == 3:
         termination_grace_s = 0.1
 
     base_contact_grace_s = 0.5
@@ -212,6 +225,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     if difficulty_level == 1:
         base_height_terminate_duration_s = 10.0
     elif difficulty_level == 2:
+        base_height_terminate_duration_s = 10.0
+    elif difficulty_level == 3:
         base_height_terminate_duration_s = 10.0
 
     #immediate terminations:
@@ -222,15 +237,21 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
         pendulum_terminate_angle_rad = math.radians(15.0)
     elif difficulty_level == 2:
         pendulum_terminate_angle_rad = math.radians(15.0)
+    elif difficulty_level == 3:
+        pendulum_terminate_angle_rad = math.radians(15.0)
 
     if difficulty_level == 1:
         pendulum_terminate_duration_s = 5.0
     elif difficulty_level == 2:
         pendulum_terminate_duration_s = 5.0
+    elif difficulty_level == 3:
+        pendulum_terminate_duration_s = 5.0
     
     if difficulty_level == 1:
         position_tolerance = 5.0
     elif difficulty_level == 2:
+        position_tolerance = 5.0
+    elif difficulty_level == 3:
         position_tolerance = 5.0
     position_terminate_duration_s = 15.0
 
