@@ -95,11 +95,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     difficulty_level = 3
 
     # Domain randomization.
-    enable_domain_randomization = False
+    enable_domain_randomization = True
     dr_seed_offset = 0
 
     # Material randomization (robot only).
-    enable_material_randomization = False
+    enable_material_randomization = True
     material_randomize_on_reset = True
     material_randomization_prob = 1.0
     material_num_buckets = 64
@@ -109,7 +109,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     material_make_consistent = True
 
     # Base mass / center-of-mass randomization.
-    enable_mass_randomization = False
+    enable_mass_randomization = True
     mass_randomize_body_name = "base"
     mass_scale_range = (0.85, 1.15)
     mass_recompute_inertia = True
@@ -119,14 +119,14 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     com_offset_z_range = (-0.01, 0.01)
 
     # Motor gain randomization (PD gain scaling).
-    enable_motor_gain_randomization = False
+    enable_motor_gain_randomization = True
     motor_gain_actuator_name = "base_legs"
     motor_stiffness_scale_range = (0.8, 1.2)
     motor_damping_scale_range = (0.8, 1.2)
     motor_gain_per_joint = True
 
     # Proprioceptive observation delay / jitter.
-    enable_obs_delay = False
+    enable_obs_delay = True
     obs_delay_steps_min = 0
     obs_delay_steps_max = 1
     obs_delay_randomize_per_reset = True
@@ -266,7 +266,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     yaw_alignment_reward_sigma = 0.2
 
     # Pendulum/balance rewards.
-    pendulum_upright_reward_scale = 0.4
+    pendulum_upright_reward_scale = 0.6
     pendulum_upright_reward_sigma = 0.052
     pendulum_vel_reward_scale = -0.05
     pendulum_vel_reward_sigma = 0.05  # unused with squared-velocity penalty
