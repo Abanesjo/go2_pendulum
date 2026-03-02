@@ -116,6 +116,8 @@ class Go2PendulumEnv(DirectRLEnv):
             self._pendulum_dof_ids = torch.tensor([], device=self.device, dtype=torch.long)
             self._pendulum_ee_body_id = None
 
+        self._apply_pendulum_joint_limits()
+
         # Derive action and joint-position bounds from soft joint limits.
         leg_joint_pos_limits = self.robot.data.soft_joint_pos_limits[:, self._leg_dof_ids, :]
         leg_default_joint_pos = self.robot.data.default_joint_pos[:, self._leg_dof_ids]
@@ -329,6 +331,21 @@ class Go2PendulumEnv(DirectRLEnv):
         for name, value in defaults.items():
             if not hasattr(self.cfg, name):
                 setattr(self.cfg, name, value)
+
+    def _apply_pendulum_joint_limits(self) -> None:
+        """Write difficulty-dependent hard limits for pendulum joints across all envs."""
+        if not self.cfg.use_pendulum or self._pendulum_dof_ids.numel() == 0:
+            return
+
+        num_pendulum_joints = self._pendulum_dof_ids.numel()
+        limits = torch.zeros((self.num_envs, num_pendulum_joints, 2), device=self.device, dtype=torch.float)
+        limits[:, :, 0] = float(self.cfg.pendulum_joint_limit_min_rad)
+        limits[:, :, 1] = float(self.cfg.pendulum_joint_limit_max_rad)
+        self.robot.write_joint_position_limit_to_sim(
+            limits,
+            joint_ids=self._pendulum_dof_ids,
+            warn_limit_violation=False,
+        )
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)

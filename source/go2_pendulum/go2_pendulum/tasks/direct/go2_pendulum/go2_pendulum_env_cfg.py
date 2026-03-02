@@ -135,6 +135,14 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     elif difficulty_level == 3:
         pendulum_angle_min = math.radians(0.0)
         pendulum_angle_max = math.radians(9.9)
+
+    # Pendulum hard joint limits (applied at runtime, no USD edits needed).
+    if difficulty_level == 1 or difficulty_level == 2:
+        pendulum_joint_limit_min_rad = math.radians(-10.0)
+        pendulum_joint_limit_max_rad = math.radians(10.0)
+    elif difficulty_level == 3:
+        pendulum_joint_limit_min_rad = math.radians(-90.0)
+        pendulum_joint_limit_max_rad = math.radians(90.0)
     
 
     # Termination conditions.
