@@ -95,7 +95,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     difficulty_level = 3
 
     # Domain randomization.
-    enable_domain_randomization = True
+    enable_domain_randomization = False
     dr_seed_offset = 0
 
     # Material randomization (robot only).
