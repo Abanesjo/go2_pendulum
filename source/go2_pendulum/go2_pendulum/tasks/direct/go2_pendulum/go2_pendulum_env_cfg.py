@@ -182,9 +182,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
         pendulum_terminate_angle_rad = math.radians(5.0)
 
     if difficulty_level == 1:
-        pendulum_terminate_duration_s = 10.0
-    elif difficulty_level == 2:
         pendulum_terminate_duration_s = 0.1
+    elif difficulty_level == 2:
+        pendulum_terminate_duration_s = 5.0
     elif difficulty_level == 3:
         pendulum_terminate_duration_s = 0.1 #Overriden
     
