@@ -88,9 +88,15 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     debug_vis = True
     use_pendulum = True
     track_goal = False
-    # difficulty_level = 1
-    # difficulty_level = 2
-    difficulty_level = 3
+
+    # Difficulty levels: 
+    # Level 1: With terminations, pendulum \pm 90 deg
+    # Level 2: With terminations, no longer starts in equilibrium
+    # Level 3: No terminations, no longer starts in equlibrium (learns proper recovery)
+
+    difficulty_level = 1
+    # # difficulty_level = 2
+    #difficulty_level = 3
 
     # Initial conditions (reset sampling).
     # - Goal target sampling in the environment frame.
@@ -100,7 +106,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     elif difficulty_level == 2:
         goal_randomization_dist_min = 0.0
-        goal_randomization_dist_max = 0.0
+        goal_randomization_dist_max = 0.3
 
     elif difficulty_level == 3:
         goal_randomization_dist_min = 0.2
@@ -128,9 +134,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     
     if difficulty_level == 1:
         pendulum_angle_min = math.radians(0.0)
-        pendulum_angle_max = math.radians(5.0)
+        pendulum_angle_max = math.radians(0.0)
     elif difficulty_level == 2:
-        pendulum_angle_min = math.radians(9.0)
+        pendulum_angle_min = math.radians(0.0)
         pendulum_angle_max = math.radians(9.9)
     elif difficulty_level == 3:
         pendulum_angle_min = math.radians(0.0)
@@ -138,11 +144,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # Pendulum hard joint limits (applied at runtime, no USD edits needed).
     if difficulty_level == 1 or difficulty_level == 2:
-        pendulum_joint_limit_min_rad = math.radians(-10.0)
-        pendulum_joint_limit_max_rad = math.radians(10.0)
-    elif difficulty_level == 3:
         pendulum_joint_limit_min_rad = math.radians(-90.0)
         pendulum_joint_limit_max_rad = math.radians(90.0)
+    elif difficulty_level == 3:
+        pendulum_joint_limit_min_rad = math.radians(-20.0)
+        pendulum_joint_limit_max_rad = math.radians(20.0)
     
 
     # Termination conditions.
@@ -151,7 +157,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     elif difficulty_level == 2:
         termination_grace_s = 0.1
     elif difficulty_level == 3:
-        termination_grace_s = 0.1
+        termination_grace_s = 25.0
 
     base_contact_grace_s = 0.5
     base_height_min = 0.28
@@ -159,35 +165,35 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     if difficulty_level == 1:
         base_height_terminate_duration_s = 10.0
     elif difficulty_level == 2:
-        base_height_terminate_duration_s = 10.0
-    elif difficulty_level == 3:
         base_height_terminate_duration_s = 0.1
+    elif difficulty_level == 3:
+        base_height_terminate_duration_s = 0.1 #Overridden
 
     #immediate terminations:
-    base_tilt_terminate_angle_rad = math.radians(45.0)
+    base_tilt_terminate_angle_rad = math.radians(60.0)
     pendulum_contact_force_threshold = 1.0
 
     if difficulty_level == 1:
-        pendulum_terminate_angle_rad = math.radians(15.0)
+        pendulum_terminate_angle_rad = math.radians(60.0)
     elif difficulty_level == 2:
-        pendulum_terminate_angle_rad = math.radians(15.0)
+        pendulum_terminate_angle_rad = math.radians(20.0)
     #Here we edit to remove the hard limits
     elif difficulty_level == 3:
-        pendulum_terminate_angle_rad = math.radians(60.0)
+        pendulum_terminate_angle_rad = math.radians(5.0)
 
     if difficulty_level == 1:
-        pendulum_terminate_duration_s = 5.0
+        pendulum_terminate_duration_s = 10.0
     elif difficulty_level == 2:
-        pendulum_terminate_duration_s = 5.0
-    elif difficulty_level == 3:
         pendulum_terminate_duration_s = 0.1
+    elif difficulty_level == 3:
+        pendulum_terminate_duration_s = 0.1 #Overriden
     
     if difficulty_level == 1:
         position_tolerance = 5.0
     elif difficulty_level == 2:
-        position_tolerance = 5.0
+        position_tolerance = 0.5
     elif difficulty_level == 3:
-        position_tolerance = 5.0
+        position_tolerance = 0.2 #Overriden
     position_terminate_duration_s = 15.0
 
     termination_penalty = -500.0
