@@ -15,7 +15,7 @@ import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.markers import VisualizationMarkers
-from isaaclab.sensors import ContactSensor, Imu
+from isaaclab.sensors import ContactSensor
 from isaaclab.utils import DelayBuffer
 from isaaclab.utils.math import sample_uniform
 
@@ -25,9 +25,59 @@ from .go2_pendulum_env_cfg import Go2PendulumEnvCfg
 class Go2PendulumEnv(DirectRLEnv):
     cfg: Go2PendulumEnvCfg
 
+    # Difficulty presets: values for each level, applied by the curriculum at runtime.
+    _DIFFICULTY_PRESETS = {
+        1: dict(
+            goal_randomization_dist_min=0.0,
+            goal_randomization_dist_max=0.0,
+            goal_yaw_randomization_min=0.0,
+            goal_yaw_randomization_max=0.0,
+            pendulum_angle_min=0.0,
+            pendulum_angle_max=0.0,
+            pendulum_joint_limit_min_rad=math.radians(-90.0),
+            pendulum_joint_limit_max_rad=math.radians(90.0),
+            termination_grace_s=0.1,
+            base_height_terminate_duration_s=10.0,
+            pendulum_terminate_angle_rad=math.radians(60.0),
+            pendulum_terminate_duration_s=0.1,
+            position_tolerance=5.0,
+        ),
+        2: dict(
+            goal_randomization_dist_min=0.0,
+            goal_randomization_dist_max=0.3,
+            goal_yaw_randomization_min=0.0,
+            goal_yaw_randomization_max=0.0,
+            pendulum_angle_min=0.0,
+            pendulum_angle_max=math.radians(9.9),
+            pendulum_joint_limit_min_rad=math.radians(-90.0),
+            pendulum_joint_limit_max_rad=math.radians(90.0),
+            termination_grace_s=0.1,
+            base_height_terminate_duration_s=0.1,
+            pendulum_terminate_angle_rad=math.radians(20.0),
+            pendulum_terminate_duration_s=5.0,
+            position_tolerance=0.5,
+        ),
+        3: dict(
+            goal_randomization_dist_min=0.2,
+            goal_randomization_dist_max=0.3,
+            goal_yaw_randomization_min=0.0,
+            goal_yaw_randomization_max=0.0,
+            pendulum_angle_min=0.0,
+            pendulum_angle_max=math.radians(9.9),
+            pendulum_joint_limit_min_rad=math.radians(-20.0),
+            pendulum_joint_limit_max_rad=math.radians(20.0),
+            termination_grace_s=25.0,
+            base_height_terminate_duration_s=0.1,
+            pendulum_terminate_angle_rad=math.radians(5.0),
+            pendulum_terminate_duration_s=0.1,
+            position_tolerance=0.2,
+        ),
+    }
+
     def __init__(self, cfg: Go2PendulumEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
-        self._ensure_cfg_defaults()
+
+        self._current_difficulty_level = 1
 
         # gait shaping
         self._feet_ids = []
@@ -257,81 +307,6 @@ class Go2PendulumEnv(DirectRLEnv):
         # add handle for debug visualization (this is set to a valid handle inside set_debug_vis)
         self.set_debug_vis(self.cfg.debug_vis)
 
-    def _ensure_cfg_defaults(self) -> None:
-        """Populate optional config fields so teacher and distill configs share one env implementation."""
-        defaults = {
-            "enable_action_lpf": False,
-            "action_lpf_cutoff_hz": 8.0,
-            "enable_domain_randomization": False,
-            "dr_seed_offset": 0,
-            "enable_material_randomization": False,
-            "material_randomize_on_reset": True,
-            "material_randomization_prob": 1.0,
-            "material_num_buckets": 64,
-            "material_static_friction_range": (0.5, 1.25),
-            "material_dynamic_friction_range": (0.4, 1.1),
-            "material_restitution_range": (0.0, 0.05),
-            "material_make_consistent": True,
-            "enable_mass_randomization": False,
-            "mass_randomize_body_name": "base",
-            "mass_scale_range": (0.85, 1.15),
-            "mass_recompute_inertia": True,
-            "enable_com_randomization": False,
-            "com_offset_x_range": (-0.015, 0.015),
-            "com_offset_y_range": (-0.015, 0.015),
-            "com_offset_z_range": (-0.01, 0.01),
-            "enable_motor_gain_randomization": False,
-            "motor_gain_actuator_name": "base_legs",
-            "motor_stiffness_scale_range": (0.8, 1.2),
-            "motor_damping_scale_range": (0.8, 1.2),
-            "motor_gain_per_joint": True,
-            "enable_obs_delay": False,
-            "obs_delay_steps_min": 0,
-            "obs_delay_steps_max": 0,
-            "obs_delay_randomize_per_reset": False,
-            "obs_delay_jitter_prob": 0.0,
-            "obs_delay_jitter_extra_max": 0,
-            "obs_delay_proprio_only": True,
-            "enable_sensor_bias_drift": False,
-            "imu_lin_vel_bias_range": 0.0,
-            "imu_ang_vel_bias_range": 0.0,
-            "imu_gravity_bias_range": 0.0,
-            "imu_lin_vel_drift_std_per_s": 0.0,
-            "imu_ang_vel_drift_std_per_s": 0.0,
-            "imu_gravity_drift_std_per_s": 0.0,
-            "encoder_joint_pos_bias_range": 0.0,
-            "encoder_joint_vel_bias_range": 0.0,
-            "encoder_pendulum_pos_bias_range": 0.0,
-            "encoder_pendulum_vel_bias_range": 0.0,
-            "encoder_joint_pos_drift_std_per_s": 0.0,
-            "encoder_joint_vel_drift_std_per_s": 0.0,
-            "encoder_pendulum_pos_drift_std_per_s": 0.0,
-            "encoder_pendulum_vel_drift_std_per_s": 0.0,
-            "enable_external_wrench_push": False,
-            "push_body_name": "base",
-            "push_is_global": True,
-            "push_interval_s_min": 2.0,
-            "push_interval_s_max": 5.0,
-            "push_duration_s_min": 0.05,
-            "push_duration_s_max": 0.15,
-            "push_force_x_range": (-25.0, 25.0),
-            "push_force_y_range": (-25.0, 25.0),
-            "push_force_z_range": (0.0, 0.0),
-            "push_torque_x_range": (0.0, 0.0),
-            "push_torque_y_range": (0.0, 0.0),
-            "push_torque_z_range": (-3.0, 3.0),
-            "observation_noise_scale": 0.0,
-            "position_noise": 0.0,
-            "body_lin_vel_noise": 0.0,
-            "orientation_noise": 0.0,
-            "body_ang_vel_noise": 0.0,
-            "pendulum_joint_pos_noise": 0.0,
-            "pendulum_joint_vel_noise": 0.0,
-        }
-        for name, value in defaults.items():
-            if not hasattr(self.cfg, name):
-                setattr(self.cfg, name, value)
-
     def _apply_pendulum_joint_limits(self) -> None:
         """Write difficulty-dependent hard limits for pendulum joints across all envs."""
         if not self.cfg.use_pendulum or self._pendulum_dof_ids.numel() == 0:
@@ -351,19 +326,14 @@ class Go2PendulumEnv(DirectRLEnv):
         self.robot = Articulation(self.cfg.robot_cfg)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
         self._pendulum_contact_sensor = None
-        self._imu_sensor = None
         if self.cfg.use_pendulum:
             self._pendulum_contact_sensor = ContactSensor(self.cfg.pendulum_contact_sensor)
-        if hasattr(self.cfg, "imu_sensor"):
-            self._imu_sensor = Imu(self.cfg.imu_sensor)
 
         # register assets and sensors so they get replicated and updated
         self.scene.articulations["robot"] = self.robot
         self.scene.sensors["contact_sensor"] = self._contact_sensor
         if self._pendulum_contact_sensor is not None:
             self.scene.sensors["pendulum_contact_sensor"] = self._pendulum_contact_sensor
-        if self._imu_sensor is not None:
-            self.scene.sensors["imu_sensor"] = self._imu_sensor
 
         # add ground plane
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
@@ -503,21 +473,18 @@ class Go2PendulumEnv(DirectRLEnv):
             if self.cfg.enable_domain_randomization and self.cfg.enable_obs_delay
             else 0
         )
-        if self._imu_sensor is not None:
-            self._proprio_obs_dim = (
-                3 + 3 + self._action_dim + self._action_dim + self._pendulum_dof_count + self._pendulum_dof_count + self._action_dim
-            )
-        else:
-            self._proprio_obs_dim = (
-                3
-                + 3
-                + 3
-                + self._action_dim
-                + self._action_dim
-                + self._pendulum_dof_count
-                + self._pendulum_dof_count
-                + self._action_dim
-            )
+        # body_lin_vel(3) + body_ang_vel(3) + projected_gravity(3) + leg_pos(12) + leg_vel(12)
+        # + pendulum_pos(P) + pendulum_vel(P) + actions(12)
+        self._proprio_obs_dim = (
+            3
+            + 3
+            + 3
+            + self._action_dim
+            + self._action_dim
+            + self._pendulum_dof_count
+            + self._pendulum_dof_count
+            + self._action_dim
+        )
         self._obs_delay_buffer = DelayBuffer(self._max_obs_delay_steps, self.num_envs, self.device)
         self._obs_delay_steps = torch.full(
             (self.num_envs,),
@@ -869,7 +836,41 @@ class Go2PendulumEnv(DirectRLEnv):
             joint_ids=self._leg_dof_ids,
         )
 
+    def _update_curriculum(self) -> None:
+        """Update noise scale and difficulty level based on training progress."""
+        if not self.cfg.enable_curriculum or self.cfg.curriculum_total_steps <= 0:
+            return
+        progress = min(1.0, max(0.0, self.common_step_counter / self.cfg.curriculum_total_steps))
+
+        # Noise curriculum: linearly ramp observation_noise_scale.
+        self.cfg.observation_noise_scale = (
+            self.cfg.noise_curriculum_start_scale
+            + progress * (self.cfg.noise_curriculum_end_scale - self.cfg.noise_curriculum_start_scale)
+        )
+
+        # Difficulty curriculum: evenly split into 3 levels.
+        if progress < 1 / 3:
+            new_level = 1
+        elif progress < 2 / 3:
+            new_level = 2
+        else:
+            new_level = 3
+
+        if new_level != self._current_difficulty_level:
+            self._current_difficulty_level = new_level
+            self._apply_difficulty_preset(new_level)
+
+    def _apply_difficulty_preset(self, level: int) -> None:
+        """Apply difficulty preset values to the config and update physics sim."""
+        preset = self._DIFFICULTY_PRESETS[level]
+        for key, value in preset.items():
+            setattr(self.cfg, key, value)
+        # Pendulum joint limits must be written to the physics sim.
+        self._apply_pendulum_joint_limits()
+        print(f"[Curriculum] Switched to difficulty level {level} at step {self.common_step_counter}")
+
     def _get_observations(self) -> dict:
+        self._update_curriculum()
         self._previous_actions = self._actions_raw_policy.clone()
 
         leg_joint_pos_raw = (
@@ -917,40 +918,38 @@ class Go2PendulumEnv(DirectRLEnv):
         else:
             yaw_error = math_utils.wrap_to_pi(target_yaw - yaw)
 
-        teacher_body_lin_vel_b = self.robot.data.root_lin_vel_b.clone()
-        teacher_body_ang_vel_b = self.robot.data.root_ang_vel_b.clone()
-        teacher_projected_gravity_b = self.robot.data.projected_gravity_b.clone()
-        teacher_leg_joint_pos = leg_joint_pos_raw.clone()
-        teacher_leg_joint_vel = leg_joint_vel_raw.clone()
-        teacher_pendulum_joint_pos = pendulum_joint_pos_raw.clone()
-        teacher_pendulum_joint_vel = pendulum_joint_vel_raw.clone()
+        # Ground-truth (clean) quantities for critic.
+        critic_body_lin_vel_b = self.robot.data.root_lin_vel_b.clone()
+        critic_body_ang_vel_b = self.robot.data.root_ang_vel_b.clone()
+        critic_projected_gravity_b = self.robot.data.projected_gravity_b.clone()
+        critic_leg_joint_pos = leg_joint_pos_raw.clone()
+        critic_leg_joint_vel = leg_joint_vel_raw.clone()
+        critic_pendulum_joint_pos = pendulum_joint_pos_raw.clone()
+        critic_pendulum_joint_vel = pendulum_joint_vel_raw.clone()
 
-        if self._imu_sensor is not None:
-            student_body_lin_vel_b = self._imu_sensor.data.lin_acc_b.clone()
-            student_body_ang_vel_b = self._imu_sensor.data.ang_vel_b.clone()
-            student_projected_gravity_b = None
-        else:
-            student_body_lin_vel_b = teacher_body_lin_vel_b.clone()
-            student_body_ang_vel_b = teacher_body_ang_vel_b.clone()
-            student_projected_gravity_b = teacher_projected_gravity_b.clone()
-        student_leg_joint_pos = leg_joint_pos_raw.clone()
-        student_leg_joint_vel = leg_joint_vel_raw.clone()
-        student_pendulum_joint_pos = pendulum_joint_pos_raw.clone()
-        student_pendulum_joint_vel = pendulum_joint_vel_raw.clone()
+        # Actor (noisy) quantities — start from ground truth, apply noise.
+        actor_body_lin_vel_b = critic_body_lin_vel_b.clone()
+        actor_body_ang_vel_b = critic_body_ang_vel_b.clone()
+        actor_projected_gravity_b = critic_projected_gravity_b.clone()
+        actor_leg_joint_pos = leg_joint_pos_raw.clone()
+        actor_leg_joint_vel = leg_joint_vel_raw.clone()
+        actor_pendulum_joint_pos = pendulum_joint_pos_raw.clone()
+        actor_pendulum_joint_vel = pendulum_joint_vel_raw.clone()
 
+        # Apply sensor bias/drift (if DR enabled).
         self._update_sensor_bias_drift()
         if self.cfg.enable_domain_randomization and self.cfg.enable_sensor_bias_drift:
-            student_body_lin_vel_b = student_body_lin_vel_b + self._bias_body_lin_vel
-            student_body_ang_vel_b = student_body_ang_vel_b + self._bias_body_ang_vel
-            if student_projected_gravity_b is not None:
-                student_projected_gravity_b = student_projected_gravity_b + self._bias_projected_gravity
-            student_leg_joint_pos = student_leg_joint_pos + self._bias_leg_joint_pos
-            student_leg_joint_vel = student_leg_joint_vel + self._bias_leg_joint_vel
+            actor_body_lin_vel_b = actor_body_lin_vel_b + self._bias_body_lin_vel
+            actor_body_ang_vel_b = actor_body_ang_vel_b + self._bias_body_ang_vel
+            actor_projected_gravity_b = actor_projected_gravity_b + self._bias_projected_gravity
+            actor_leg_joint_pos = actor_leg_joint_pos + self._bias_leg_joint_pos
+            actor_leg_joint_vel = actor_leg_joint_vel + self._bias_leg_joint_vel
             if self._pendulum_dof_count > 0:
-                student_pendulum_joint_pos = student_pendulum_joint_pos + self._bias_pendulum_joint_pos
-                student_pendulum_joint_vel = student_pendulum_joint_vel + self._bias_pendulum_joint_vel
+                actor_pendulum_joint_pos = actor_pendulum_joint_pos + self._bias_pendulum_joint_pos
+                actor_pendulum_joint_vel = actor_pendulum_joint_vel + self._bias_pendulum_joint_vel
 
-        obs_noise_scale = self.cfg.observation_noise_scale if self.cfg.enable_domain_randomization else 0.0
+        # Apply observation noise (scaled by curriculum-driven observation_noise_scale).
+        obs_noise_scale = self.cfg.observation_noise_scale
         body_lin_vel_noise = self.cfg.body_lin_vel_noise * obs_noise_scale
         body_ang_vel_noise = self.cfg.body_ang_vel_noise * obs_noise_scale
         position_noise = self.cfg.position_noise * obs_noise_scale
@@ -959,18 +958,18 @@ class Go2PendulumEnv(DirectRLEnv):
         pendulum_joint_vel_noise = self.cfg.pendulum_joint_vel_noise * obs_noise_scale
 
         if body_lin_vel_noise > 0.0:
-            student_body_lin_vel_b = student_body_lin_vel_b + sample_uniform(
+            actor_body_lin_vel_b = actor_body_lin_vel_b + sample_uniform(
                 -body_lin_vel_noise,
                 body_lin_vel_noise,
-                student_body_lin_vel_b.shape,
-                student_body_lin_vel_b.device,
+                actor_body_lin_vel_b.shape,
+                actor_body_lin_vel_b.device,
             )
         if body_ang_vel_noise > 0.0:
-            student_body_ang_vel_b = student_body_ang_vel_b + sample_uniform(
+            actor_body_ang_vel_b = actor_body_ang_vel_b + sample_uniform(
                 -body_ang_vel_noise,
                 body_ang_vel_noise,
-                student_body_ang_vel_b.shape,
-                student_body_ang_vel_b.device,
+                actor_body_ang_vel_b.shape,
+                actor_body_ang_vel_b.device,
             )
         if position_noise > 0.0:
             position_error_xy = position_error_xy + sample_uniform(
@@ -988,103 +987,56 @@ class Go2PendulumEnv(DirectRLEnv):
             )
         if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
             if pendulum_joint_pos_noise > 0.0:
-                student_pendulum_joint_pos = student_pendulum_joint_pos + sample_uniform(
+                actor_pendulum_joint_pos = actor_pendulum_joint_pos + sample_uniform(
                     -pendulum_joint_pos_noise,
                     pendulum_joint_pos_noise,
-                    student_pendulum_joint_pos.shape,
-                    student_pendulum_joint_pos.device,
+                    actor_pendulum_joint_pos.shape,
+                    actor_pendulum_joint_pos.device,
                 )
             if pendulum_joint_vel_noise > 0.0:
-                student_pendulum_joint_vel = student_pendulum_joint_vel + sample_uniform(
+                actor_pendulum_joint_vel = actor_pendulum_joint_vel + sample_uniform(
                     -pendulum_joint_vel_noise,
                     pendulum_joint_vel_noise,
-                    student_pendulum_joint_vel.shape,
-                    student_pendulum_joint_vel.device,
+                    actor_pendulum_joint_vel.shape,
+                    actor_pendulum_joint_vel.device,
                 )
+
         state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
 
-        if self._imu_sensor is not None:
-            proprio_block = torch.cat(
-                [
-                    student_body_lin_vel_b,
-                    student_body_ang_vel_b,
-                    student_leg_joint_pos,
-                    student_leg_joint_vel,
-                    student_pendulum_joint_pos,
-                    student_pendulum_joint_vel,
-                    self._actions_executed,
-                ],
-                dim=-1,
-            )
-            proprio_block = self._apply_obs_delay_and_jitter(proprio_block)
-            idx0 = 3
-            idx1 = idx0 + 3
-            idx2 = idx1 + self._action_dim
-            idx3 = idx2 + self._action_dim
-            idx4 = idx3 + self._pendulum_dof_count
-            idx5 = idx4 + self._pendulum_dof_count
-            delayed_imu_lin_acc = proprio_block[:, :idx0]
-            delayed_imu_ang_vel = proprio_block[:, idx0:idx1]
-            delayed_leg_joint_pos = proprio_block[:, idx1:idx2]
-            delayed_leg_joint_vel = proprio_block[:, idx2:idx3]
-            delayed_pendulum_joint_pos = proprio_block[:, idx3:idx4]
-            delayed_pendulum_joint_vel = proprio_block[:, idx4:idx5]
-            delayed_actions = proprio_block[:, idx5:]
-
-            policy_tensors = [
-                delayed_imu_lin_acc,
-                delayed_imu_ang_vel,
-                state_error,
-                delayed_leg_joint_pos,
-                delayed_leg_joint_vel,
-                delayed_pendulum_joint_pos,
-                delayed_pendulum_joint_vel,
-                delayed_actions,
-            ]
-            teacher_tensors = [
-                teacher_body_lin_vel_b,
-                teacher_body_ang_vel_b,
-                teacher_projected_gravity_b,
-                state_error,
-                teacher_leg_joint_pos,
-                teacher_leg_joint_vel,
-                teacher_pendulum_joint_pos,
-                teacher_pendulum_joint_vel,
+        # Apply observation delay to actor proprioceptive block.
+        proprio_block = torch.cat(
+            [
+                actor_body_lin_vel_b,
+                actor_body_ang_vel_b,
+                actor_projected_gravity_b,
+                actor_leg_joint_pos,
+                actor_leg_joint_vel,
+                actor_pendulum_joint_pos,
+                actor_pendulum_joint_vel,
                 self._actions_executed,
-                self.clock_inputs,
-            ]
-        else:
-            proprio_block = torch.cat(
-                [
-                    student_body_lin_vel_b,
-                    student_body_ang_vel_b,
-                    student_projected_gravity_b,
-                    student_leg_joint_pos,
-                    student_leg_joint_vel,
-                    student_pendulum_joint_pos,
-                    student_pendulum_joint_vel,
-                    self._actions_executed,
-                ],
-                dim=-1,
-            )
-            proprio_block = self._apply_obs_delay_and_jitter(proprio_block)
-            idx0 = 3
-            idx1 = idx0 + 3
-            idx2 = idx1 + 3
-            idx3 = idx2 + self._action_dim
-            idx4 = idx3 + self._action_dim
-            idx5 = idx4 + self._pendulum_dof_count
-            idx6 = idx5 + self._pendulum_dof_count
-            delayed_body_lin_vel = proprio_block[:, :idx0]
-            delayed_body_ang_vel = proprio_block[:, idx0:idx1]
-            delayed_projected_gravity = proprio_block[:, idx1:idx2]
-            delayed_leg_joint_pos = proprio_block[:, idx2:idx3]
-            delayed_leg_joint_vel = proprio_block[:, idx3:idx4]
-            delayed_pendulum_joint_pos = proprio_block[:, idx4:idx5]
-            delayed_pendulum_joint_vel = proprio_block[:, idx5:idx6]
-            delayed_actions = proprio_block[:, idx6:]
+            ],
+            dim=-1,
+        )
+        proprio_block = self._apply_obs_delay_and_jitter(proprio_block)
+        idx0 = 3
+        idx1 = idx0 + 3
+        idx2 = idx1 + 3
+        idx3 = idx2 + self._action_dim
+        idx4 = idx3 + self._action_dim
+        idx5 = idx4 + self._pendulum_dof_count
+        idx6 = idx5 + self._pendulum_dof_count
+        delayed_body_lin_vel = proprio_block[:, :idx0]
+        delayed_body_ang_vel = proprio_block[:, idx0:idx1]
+        delayed_projected_gravity = proprio_block[:, idx1:idx2]
+        delayed_leg_joint_pos = proprio_block[:, idx2:idx3]
+        delayed_leg_joint_vel = proprio_block[:, idx3:idx4]
+        delayed_pendulum_joint_pos = proprio_block[:, idx4:idx5]
+        delayed_pendulum_joint_vel = proprio_block[:, idx5:idx6]
+        delayed_actions = proprio_block[:, idx6:]
 
-            policy_tensors = [
+        # Policy obs (actor — potentially noisy/delayed).
+        policy_obs = torch.cat(
+            [
                 delayed_body_lin_vel,
                 delayed_body_ang_vel,
                 delayed_projected_gravity,
@@ -1095,13 +1047,28 @@ class Go2PendulumEnv(DirectRLEnv):
                 delayed_pendulum_joint_vel,
                 delayed_actions,
                 self.clock_inputs,
-            ]
-            teacher_tensors = None
+            ],
+            dim=-1,
+        )
 
-        observations = {"policy": torch.cat(policy_tensors, dim=-1)}
-        if teacher_tensors is not None:
-            observations["teacher"] = torch.cat(teacher_tensors, dim=-1)
-        return observations
+        # Critic obs (always clean ground truth).
+        critic_obs = torch.cat(
+            [
+                critic_body_lin_vel_b,
+                critic_body_ang_vel_b,
+                critic_projected_gravity_b,
+                state_error,
+                critic_leg_joint_pos,
+                critic_leg_joint_vel,
+                critic_pendulum_joint_pos,
+                critic_pendulum_joint_vel,
+                self._actions_executed,
+                self.clock_inputs,
+            ],
+            dim=-1,
+        )
+
+        return {"policy": policy_obs, "critic": critic_obs}
 
     def _compute_base_tilt_rad(self) -> torch.Tensor:
         projected_gravity_b = self.robot.data.projected_gravity_b

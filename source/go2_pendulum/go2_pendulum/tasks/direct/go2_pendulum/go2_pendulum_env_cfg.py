@@ -84,119 +84,73 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_desired_joint_pos_hard_clamp = True
     action_over_limit_power = 2.0
     observation_space = 48 + 4 + 4
-    state_space = 0
+    state_space = 48 + 4 + 4  # Asymmetric actor-critic: critic obs dimension (set in __post_init__)
     debug_vis = True
     use_pendulum = True
     track_goal = False
 
-    # Difficulty levels: 
-    # Level 1: With terminations, pendulum \pm 90 deg
-    # Level 2: With terminations, no longer starts in equilibrium
-    # Level 3: No terminations, no longer starts in equlibrium (learns proper recovery)
+    # Action low-pass filter.
+    enable_action_lpf = False
+    action_lpf_cutoff_hz = 8.0
 
-    difficulty_level = 1
-    # # difficulty_level = 2
-    #difficulty_level = 3
+    # --- Curriculum (noise ramp + difficulty progression) ---
+    # curriculum_total_steps is computed dynamically in train.py from max_iterations * num_steps_per_env.
+    # Set to 0 to disable curriculum (stays at initial difficulty and noise scale).
+    enable_curriculum = True
+    curriculum_total_steps = 0
+    noise_curriculum_start_scale = 0.0
+    noise_curriculum_end_scale = 1.0
+
+    # --- Difficulty-dependent defaults (level 1 initial values) ---
+    # These are updated at runtime by the difficulty curriculum.
+    # See _DIFFICULTY_PRESETS in go2_pendulum_env.py for all three levels.
 
     # Initial conditions (reset sampling).
-    # - Goal target sampling in the environment frame.
-    if difficulty_level == 1:
-        goal_randomization_dist_min = 0.0
-        goal_randomization_dist_max = 0.0
+    goal_randomization_dist_min = 0.0
+    goal_randomization_dist_max = 0.0
 
-    elif difficulty_level == 2:
-        goal_randomization_dist_min = 0.0
-        goal_randomization_dist_max = 0.3
-
-    elif difficulty_level == 3:
-        goal_randomization_dist_min = 0.2
-        goal_randomization_dist_max = 0.3
-    
     if track_goal:
         goal_randomization_angle_min = math.radians(-30)
         goal_randomization_angle_max = math.radians(30)
-    else:  
+    else:
         goal_randomization_angle_min = math.radians(0)
         goal_randomization_angle_max = math.radians(360)
-        
-    if difficulty_level == 1:
-        goal_yaw_randomization_min = math.radians(0)
-        goal_yaw_randomization_max = math.radians(0)
-    elif difficulty_level == 2:
-        goal_yaw_randomization_min = math.radians(0)
-        goal_yaw_randomization_max = math.radians(0)
-    elif difficulty_level == 3:
-        goal_yaw_randomization_min = math.radians(0)
-        goal_yaw_randomization_max = math.radians(0)
 
-    # - Pendulum reset angle sampling.
+    goal_yaw_randomization_min = math.radians(0)
+    goal_yaw_randomization_max = math.radians(0)
+
+    # Pendulum reset angle sampling.
     pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
-    
-    if difficulty_level == 1:
-        pendulum_angle_min = math.radians(0.0)
-        pendulum_angle_max = math.radians(0.0)
-    elif difficulty_level == 2:
-        pendulum_angle_min = math.radians(0.0)
-        pendulum_angle_max = math.radians(9.9)
-    elif difficulty_level == 3:
-        pendulum_angle_min = math.radians(0.0)
-        pendulum_angle_max = math.radians(9.9)
+    pendulum_angle_min = math.radians(0.0)
+    pendulum_angle_max = math.radians(0.0)
 
     # Pendulum hard joint limits (applied at runtime, no USD edits needed).
-    if difficulty_level == 1 or difficulty_level == 2:
-        pendulum_joint_limit_min_rad = math.radians(-90.0)
-        pendulum_joint_limit_max_rad = math.radians(90.0)
-    elif difficulty_level == 3:
-        pendulum_joint_limit_min_rad = math.radians(-20.0)
-        pendulum_joint_limit_max_rad = math.radians(20.0)
-    
+    pendulum_joint_limit_min_rad = math.radians(-90.0)
+    pendulum_joint_limit_max_rad = math.radians(90.0)
 
     # Termination conditions.
-    if difficulty_level == 1:
-        termination_grace_s = 0.1
-    elif difficulty_level == 2:
-        termination_grace_s = 0.1
-    elif difficulty_level == 3:
-        termination_grace_s = 25.0
-
+    termination_grace_s = 0.1
     base_contact_grace_s = 0.5
     base_height_min = 0.28
-
-    if difficulty_level == 1:
-        base_height_terminate_duration_s = 10.0
-    elif difficulty_level == 2:
-        base_height_terminate_duration_s = 0.1
-    elif difficulty_level == 3:
-        base_height_terminate_duration_s = 0.1 #Overridden
-
-    #immediate terminations:
+    base_height_terminate_duration_s = 10.0
     base_tilt_terminate_angle_rad = math.radians(60.0)
     pendulum_contact_force_threshold = 1.0
-
-    if difficulty_level == 1:
-        pendulum_terminate_angle_rad = math.radians(60.0)
-    elif difficulty_level == 2:
-        pendulum_terminate_angle_rad = math.radians(20.0)
-    #Here we edit to remove the hard limits
-    elif difficulty_level == 3:
-        pendulum_terminate_angle_rad = math.radians(5.0)
-
-    if difficulty_level == 1:
-        pendulum_terminate_duration_s = 0.1
-    elif difficulty_level == 2:
-        pendulum_terminate_duration_s = 5.0
-    elif difficulty_level == 3:
-        pendulum_terminate_duration_s = 0.1 #Overriden
-    
-    if difficulty_level == 1:
-        position_tolerance = 5.0
-    elif difficulty_level == 2:
-        position_tolerance = 0.5
-    elif difficulty_level == 3:
-        position_tolerance = 0.2 #Overriden
+    pendulum_terminate_angle_rad = math.radians(60.0)
+    pendulum_terminate_duration_s = 0.1
+    position_tolerance = 5.0
     position_terminate_duration_s = 15.0
-
     termination_penalty = -500.0
+
+    # --- Observation noise (applied to actor obs only, scaled by observation_noise_scale) ---
+    # TODO(human): Tune these noise magnitudes based on real sensor characteristics.
+    # These define the max noise at observation_noise_scale=1.0 (uniform ±value).
+    observation_noise_scale = 0.0
+    body_lin_vel_noise = 0.1
+    body_ang_vel_noise = 0.2
+    orientation_noise = 0.05
+    position_noise = 0.01
+    pendulum_joint_pos_noise = 0.01
+    pendulum_joint_vel_noise = 1.5
 
     # Position tracking and heading alignment.
     position_reward_scale = 0.4
@@ -231,6 +185,78 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     base_height_target = 0.33
     base_height_reward_sigma = 0.1
     base_height_reward_scale = 0.2
+
+    # --- Domain randomization (disabled by default, enable for sim-to-real) ---
+    enable_domain_randomization = False
+    dr_seed_offset = 0
+
+    # Material randomization.
+    enable_material_randomization = False
+    material_randomize_on_reset = True
+    material_randomization_prob = 1.0
+    material_num_buckets = 64
+    material_static_friction_range = (0.5, 1.25)
+    material_dynamic_friction_range = (0.4, 1.1)
+    material_restitution_range = (0.0, 0.05)
+    material_make_consistent = True
+
+    # Base mass / COM randomization.
+    enable_mass_randomization = False
+    mass_randomize_body_name = "base"
+    mass_scale_range = (0.85, 1.15)
+    mass_recompute_inertia = True
+    enable_com_randomization = False
+    com_offset_x_range = (-0.015, 0.015)
+    com_offset_y_range = (-0.015, 0.015)
+    com_offset_z_range = (-0.01, 0.01)
+
+    # Motor gain randomization.
+    enable_motor_gain_randomization = False
+    motor_gain_actuator_name = "base_legs"
+    motor_stiffness_scale_range = (0.8, 1.2)
+    motor_damping_scale_range = (0.8, 1.2)
+    motor_gain_per_joint = True
+
+    # Observation delay.
+    enable_obs_delay = False
+    obs_delay_steps_min = 0
+    obs_delay_steps_max = 0
+    obs_delay_randomize_per_reset = False
+    obs_delay_jitter_prob = 0.0
+    obs_delay_jitter_extra_max = 0
+    obs_delay_proprio_only = True
+
+    # Sensor bias and drift randomization.
+    enable_sensor_bias_drift = False
+    imu_lin_vel_bias_range = 0.05
+    imu_ang_vel_bias_range = math.radians(3.0)
+    imu_gravity_bias_range = 0.03
+    imu_lin_vel_drift_std_per_s = 0.01
+    imu_ang_vel_drift_std_per_s = math.radians(0.5)
+    imu_gravity_drift_std_per_s = 0.0
+    encoder_joint_pos_bias_range = math.radians(1.0)
+    encoder_joint_vel_bias_range = math.radians(5.0)
+    encoder_pendulum_pos_bias_range = math.radians(0.1)
+    encoder_pendulum_vel_bias_range = math.radians(1.0)
+    encoder_joint_pos_drift_std_per_s = math.radians(0.0)
+    encoder_joint_vel_drift_std_per_s = math.radians(0.0)
+    encoder_pendulum_pos_drift_std_per_s = math.radians(0.0)
+    encoder_pendulum_vel_drift_std_per_s = math.radians(0.0)
+
+    # External wrench pushes.
+    enable_external_wrench_push = False
+    push_body_name = "base"
+    push_is_global = True
+    push_interval_s_min = 2.0
+    push_interval_s_max = 5.0
+    push_duration_s_min = 0.05
+    push_duration_s_max = 0.15
+    push_force_x_range = (-25.0, 25.0)
+    push_force_y_range = (-25.0, 25.0)
+    push_force_z_range = (0.0, 0.0)
+    push_torque_x_range = (0.0, 0.0)
+    push_torque_y_range = (0.0, 0.0)
+    push_torque_z_range = (-3.0, 3.0)
 
     # Simulation and scene.
     sim: SimulationCfg = SimulationCfg(
@@ -295,6 +321,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
         # Keep observation dims fixed so policies are compatible across pendulum modes.
         self.observation_space = 48 + 4 + 2 * len(self.pendulum_joint_names)
+        # Critic gets same structure as actor, just ground-truth (no noise).
+        self.state_space = self.observation_space
 
         # Increase GPU rigid patch buffer to avoid PhysX patch overflow.
         self.sim.physx.gpu_max_rigid_patch_count = 2**18

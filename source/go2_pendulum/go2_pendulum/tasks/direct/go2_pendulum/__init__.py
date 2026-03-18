@@ -23,18 +23,3 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     },
 )
-
-gym.register(
-    id="Template-Go2-Pendulum-Distill-Direct-v0",
-    entry_point=f"{__name__}.go2_pendulum_env:Go2PendulumEnv",
-    disable_env_checker=True,
-    kwargs={
-        "env_cfg_entry_point": f"{__name__}.go2_pendulum_distill_cfg:Go2PendulumDistillEnvCfg",
-        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:PPORunnerCfg",
-        "rsl_rl_distillation_cfg_entry_point": (
-            f"{agents.__name__}.rsl_rl_distillation_cfg:Go2PendulumDistillationRunnerCfg"
-        ),
-        "skrl_amp_cfg_entry_point": f"{agents.__name__}:skrl_amp_cfg.yaml",
-        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
-    },
-)
