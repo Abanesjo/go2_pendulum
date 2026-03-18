@@ -167,10 +167,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # set the log directory for the environment (works for all environment types)
     env_cfg.log_dir = log_dir
 
-    # Compute curriculum total steps from runner config so env doesn't need to know max_iterations.
-    if hasattr(env_cfg, "enable_curriculum") and env_cfg.enable_curriculum and env_cfg.curriculum_total_steps == 0:
-        env_cfg.curriculum_total_steps = agent_cfg.max_iterations * agent_cfg.num_steps_per_env
-
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
 

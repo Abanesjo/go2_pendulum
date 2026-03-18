@@ -94,10 +94,10 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     action_lpf_cutoff_hz = 8.0
 
     # --- Curriculum (noise ramp + difficulty progression) ---
-    # curriculum_total_steps is computed dynamically in train.py from max_iterations * num_steps_per_env.
-    # Set to 0 to disable curriculum (stays at initial difficulty and noise scale).
+    # Curriculum completes over 40000 iterations (40000 * 32 = 480000 steps).
+    # Beyond that, training continues at the highest difficulty level.
     enable_curriculum = True
-    curriculum_total_steps = 0
+    curriculum_total_steps = 40000 * 32
     noise_curriculum_start_scale = 0.0
     noise_curriculum_end_scale = 1.0
 
@@ -139,7 +139,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_terminate_duration_s = 0.1
     position_tolerance = 5.0
     position_terminate_duration_s = 15.0
-    termination_penalty = -500.0
+    termination_penalty = -0.0
 
     # --- Observation noise (applied to actor obs only, scaled by observation_noise_scale) ---
     # TODO(human): Tune these noise magnitudes based on real sensor characteristics.
@@ -247,8 +247,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_external_wrench_push = False
     push_body_name = "base"
     push_is_global = True
-    push_interval_s_min = 2.0
-    push_interval_s_max = 5.0
+    push_interval_s_min = 5.0
+    push_interval_s_max = 10.0
     push_duration_s_min = 0.05
     push_duration_s_max = 0.15
     push_force_x_range = (-25.0, 25.0)
@@ -256,7 +256,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     push_force_z_range = (0.0, 0.0)
     push_torque_x_range = (0.0, 0.0)
     push_torque_y_range = (0.0, 0.0)
-    push_torque_z_range = (-3.0, 3.0)
+    push_torque_z_range = (0.0, 0.0)
 
     # Simulation and scene.
     sim: SimulationCfg = SimulationCfg(

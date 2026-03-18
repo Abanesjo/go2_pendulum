@@ -33,7 +33,7 @@ class Go2PendulumEnv(DirectRLEnv):
             goal_yaw_randomization_min=0.0,
             goal_yaw_randomization_max=0.0,
             pendulum_angle_min=0.0,
-            pendulum_angle_max=0.0,
+            pendulum_angle_max=math.radians(5.0),
             pendulum_joint_limit_min_rad=math.radians(-90.0),
             pendulum_joint_limit_max_rad=math.radians(90.0),
             termination_grace_s=0.1,
@@ -41,6 +41,7 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_angle_rad=math.radians(60.0),
             pendulum_terminate_duration_s=0.1,
             position_tolerance=5.0,
+            enable_domain_randomization=False,
         ),
         2: dict(
             goal_randomization_dist_min=0.0,
@@ -48,7 +49,7 @@ class Go2PendulumEnv(DirectRLEnv):
             goal_yaw_randomization_min=0.0,
             goal_yaw_randomization_max=0.0,
             pendulum_angle_min=0.0,
-            pendulum_angle_max=math.radians(9.9),
+            pendulum_angle_max=math.radians(10.0),
             pendulum_joint_limit_min_rad=math.radians(-90.0),
             pendulum_joint_limit_max_rad=math.radians(90.0),
             termination_grace_s=0.1,
@@ -56,6 +57,7 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_angle_rad=math.radians(20.0),
             pendulum_terminate_duration_s=5.0,
             position_tolerance=0.5,
+            enable_domain_randomization=False,
         ),
         3: dict(
             goal_randomization_dist_min=0.2,
@@ -63,7 +65,7 @@ class Go2PendulumEnv(DirectRLEnv):
             goal_yaw_randomization_min=0.0,
             goal_yaw_randomization_max=0.0,
             pendulum_angle_min=0.0,
-            pendulum_angle_max=math.radians(9.9),
+            pendulum_angle_max=math.radians(20.0),
             pendulum_joint_limit_min_rad=math.radians(-20.0),
             pendulum_joint_limit_max_rad=math.radians(20.0),
             termination_grace_s=25.0,
@@ -71,6 +73,23 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_angle_rad=math.radians(5.0),
             pendulum_terminate_duration_s=0.1,
             position_tolerance=0.2,
+            enable_domain_randomization=False,
+        ),
+        4: dict(
+            goal_randomization_dist_min=0.2,
+            goal_randomization_dist_max=0.3,
+            goal_yaw_randomization_min=0.0,
+            goal_yaw_randomization_max=0.0,
+            pendulum_angle_min=0.0,
+            pendulum_angle_max=math.radians(20.0),
+            pendulum_joint_limit_min_rad=math.radians(-20.0),
+            pendulum_joint_limit_max_rad=math.radians(20.0),
+            termination_grace_s=25.0,
+            base_height_terminate_duration_s=0.1,
+            pendulum_terminate_angle_rad=math.radians(5.0),
+            pendulum_terminate_duration_s=0.1,
+            position_tolerance=0.2,
+            enable_domain_randomization=True,
         ),
     }
 
@@ -848,13 +867,15 @@ class Go2PendulumEnv(DirectRLEnv):
             + progress * (self.cfg.noise_curriculum_end_scale - self.cfg.noise_curriculum_start_scale)
         )
 
-        # Difficulty curriculum: evenly split into 3 levels.
-        if progress < 1 / 3:
+        # Difficulty curriculum: evenly split into 4 levels.
+        if progress < 1 / 4:
             new_level = 1
-        elif progress < 2 / 3:
+        elif progress < 2 / 4:
             new_level = 2
-        else:
+        elif progress < 3 / 4:
             new_level = 3
+        else:
+            new_level = 4
 
         if new_level != self._current_difficulty_level:
             self._current_difficulty_level = new_level
@@ -1545,6 +1566,10 @@ class Go2PendulumEnv(DirectRLEnv):
         extras["Episode_Metric/mean_action_constraint_violation_abs"] = mean_action_constraint_violation_abs.item()
         self._episode_mean_action_constraint_violation_abs_sum[env_ids] = 0.0
         self._episode_action_count[env_ids] = 0
+        if self.cfg.enable_curriculum and self.cfg.curriculum_total_steps > 0:
+            extras["Episode_Metric/curriculum_progress"] = min(1.0, max(0.0, self.common_step_counter / self.cfg.curriculum_total_steps))
+        else:
+            extras["Episode_Metric/curriculum_progress"] = 0.0
         self.extras["log"].update(extras)
 
     def _set_debug_vis_impl(self, debug_vis: bool):
