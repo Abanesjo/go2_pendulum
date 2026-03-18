@@ -71,3 +71,6 @@ tests/
 .isaac-lab-docker-history
 
 *.pyc
+
+#Agents
+CLAUDE.md
