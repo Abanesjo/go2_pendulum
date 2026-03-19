@@ -97,6 +97,10 @@ class Go2PendulumEnv(DirectRLEnv):
         super().__init__(cfg, render_mode, **kwargs)
 
         self._current_difficulty_level = 1
+        if self.cfg.difficulty_override >= 1:
+            self.cfg.enable_curriculum = False
+            self._current_difficulty_level = self.cfg.difficulty_override
+            self._apply_difficulty_preset(self.cfg.difficulty_override)
 
         # gait shaping
         self._feet_ids = []

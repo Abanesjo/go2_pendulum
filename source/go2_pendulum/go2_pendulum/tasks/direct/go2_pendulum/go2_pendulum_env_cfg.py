@@ -100,10 +100,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     curriculum_total_steps = 40000 * 32
     noise_curriculum_start_scale = 0.0
     noise_curriculum_end_scale = 1.0
+    difficulty_override: int = -1  # -1 = use curriculum, 1-4 = force that difficulty level
 
     # --- Difficulty-dependent defaults (level 1 initial values) ---
     # These are updated at runtime by the difficulty curriculum.
-    # See _DIFFICULTY_PRESETS in go2_pendulum_env.py for all three levels.
+    # See _DIFFICULTY_PRESETS in go2_pendulum_env.py for all four levels.
 
     # Initial conditions (reset sampling).
     goal_randomization_dist_min = 0.0
