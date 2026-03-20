@@ -163,7 +163,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Pendulum/balance rewards.
     pendulum_upright_reward_scale = 0.6
     pendulum_upright_reward_sigma = 0.052
-    pendulum_vel_reward_scale = -0.05
+    pendulum_vel_reward_scale = -1.0
     pendulum_vel_reward_sigma = 0.05  # unused with squared-velocity penalty
     balanced_movement_reward_scale = 0.1
 
