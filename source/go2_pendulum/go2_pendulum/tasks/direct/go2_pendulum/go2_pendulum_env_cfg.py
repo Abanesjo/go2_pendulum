@@ -17,6 +17,7 @@ from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 GO2_PENDULUM_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_model", "go2_pendulum.usd")
 GO2_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_model", "go2.usd")
@@ -87,7 +88,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     state_space = 48 + 4 + 4  # Asymmetric actor-critic: critic obs dimension (set in __post_init__)
     debug_vis = True
     use_pendulum = True
-    track_goal = False
 
     # Action low-pass filter.
     enable_action_lpf = False
@@ -110,12 +110,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     goal_randomization_dist_min = 0.0
     goal_randomization_dist_max = 0.0
 
-    if track_goal:
-        goal_randomization_angle_min = math.radians(-30)
-        goal_randomization_angle_max = math.radians(30)
-    else:
-        goal_randomization_angle_min = math.radians(0)
-        goal_randomization_angle_max = math.radians(360)
+    goal_randomization_angle_min = math.radians(0)
+    goal_randomization_angle_max = math.radians(360)
 
     goal_yaw_randomization_min = math.radians(0)
     goal_yaw_randomization_max = math.radians(0)
@@ -301,8 +297,9 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     target_marker_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
         prim_path="/Visuals/TargetMarkers",
         markers={
-            "target_sphere": sim_utils.SphereCfg(
-                radius=0.1,
+            "target_arrow": sim_utils.UsdFileCfg(
+                usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
+                scale=(1.0, 0.1, 0.1),
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)),
             ),
         },

@@ -46,8 +46,8 @@ class Go2PendulumEnv(DirectRLEnv):
         2: dict(
             goal_randomization_dist_min=0.0,
             goal_randomization_dist_max=0.3,
-            goal_yaw_randomization_min=0.0,
-            goal_yaw_randomization_max=0.0,
+            goal_yaw_randomization_min=math.radians(-15),
+            goal_yaw_randomization_max=math.radians(15),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(10.0),
             pendulum_joint_limit_min_rad=math.radians(-90.0),
@@ -62,8 +62,8 @@ class Go2PendulumEnv(DirectRLEnv):
         3: dict(
             goal_randomization_dist_min=0.2,
             goal_randomization_dist_max=0.3,
-            goal_yaw_randomization_min=0.0,
-            goal_yaw_randomization_max=0.0,
+            goal_yaw_randomization_min=math.radians(-45),
+            goal_yaw_randomization_max=math.radians(45),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(20.0),
             pendulum_joint_limit_min_rad=math.radians(-20.0),
@@ -78,8 +78,8 @@ class Go2PendulumEnv(DirectRLEnv):
         4: dict(
             goal_randomization_dist_min=0.2,
             goal_randomization_dist_max=0.3,
-            goal_yaw_randomization_min=0.0,
-            goal_yaw_randomization_max=0.0,
+            goal_yaw_randomization_min=math.radians(-180),
+            goal_yaw_randomization_max=math.radians(180),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(20.0),
             pendulum_joint_limit_min_rad=math.radians(-20.0),
@@ -249,7 +249,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self.target_state = None
 
         # Marker visualization buffers.
-        self._marker_offset = None
         self._marker_orientations = None
         self._marker_locations = None
         self._marker_up = torch.tensor([0.0, 0.0, 1.0])
@@ -935,13 +934,7 @@ class Go2PendulumEnv(DirectRLEnv):
             ),
             dim=-1,
         )
-        if self.cfg.track_goal:
-            goal_heading = torch.atan2(position_error_xy[:, 1], position_error_xy[:, 0])
-            yaw_error = math_utils.wrap_to_pi(goal_heading)
-            near_goal = torch.linalg.norm(position_error_xy, dim=1) < 1e-6
-            yaw_error = torch.where(near_goal, torch.zeros_like(yaw_error), yaw_error)
-        else:
-            yaw_error = math_utils.wrap_to_pi(target_yaw - yaw)
+        yaw_error = math_utils.wrap_to_pi(target_yaw - yaw)
 
         # Ground-truth (clean) quantities for critic.
         critic_body_lin_vel_b = self.robot.data.root_lin_vel_b.clone()
@@ -1105,13 +1098,7 @@ class Go2PendulumEnv(DirectRLEnv):
             base_pos_xy = self.robot.data.root_pos_w[:, :2] - env_origins[:, :2]
             position_error = torch.linalg.norm(self.target_state[:, :2] - base_pos_xy, dim=1)
             _, _, yaw = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)
-            if self.cfg.track_goal:
-                goal_dir_xy = self.target_state[:, :2] - base_pos_xy
-                goal_heading = torch.atan2(goal_dir_xy[:, 1], goal_dir_xy[:, 0])
-                yaw_error = math_utils.wrap_to_pi(goal_heading - yaw)
-                yaw_error = torch.where(position_error < 1e-6, torch.zeros_like(yaw_error), yaw_error)
-            else:
-                yaw_error = math_utils.wrap_to_pi(self.target_state[:, 2] - yaw)
+            yaw_error = math_utils.wrap_to_pi(self.target_state[:, 2] - yaw)
             position_sigma = max(self.cfg.position_reward_sigma, 1e-6)
             position_tracking_reward = torch.exp(-(position_error / position_sigma))
             rew_progress = self._prev_position_error - position_error
@@ -1604,42 +1591,22 @@ class Go2PendulumEnv(DirectRLEnv):
         if self._marker_locations is None:
             self._marker_up = self._marker_up.to(device=self.device)
             self._marker_locations = torch.zeros((self.num_envs, 3), device=self.device)
-            self._marker_offset = torch.zeros((self.num_envs, 3), device=self.device)
-            self._marker_offset[:, -1] = 1.0
             self._marker_orientations = torch.zeros((self.num_envs, 4), device=self.device)
 
-        env_origins = self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
-        target_xy = self.target_state[:, :2]
-        target_pos_world = target_xy + env_origins[:, :2]
+        env_origins = (
+            self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
+        )
 
-        robot_pos_3d = self.robot.data.root_pos_w
-        robot_pos_2d = robot_pos_3d[:, :2]
+        # Arrow at goal XY, 1m above ground.
+        self._marker_locations[:, :2] = self.target_state[:, :2] + env_origins[:, :2]
+        self._marker_locations[:, 2] = env_origins[:, 2] + 1.0
 
-        direction_to_target = target_pos_world - robot_pos_2d
-        direction_norm = torch.linalg.norm(direction_to_target, dim=-1, keepdim=True)
-        direction_norm = torch.clamp(direction_norm, min=1e-6)
-        direction_unit = direction_to_target / direction_norm
+        # Arrow oriented by goal_yaw around Z.
+        self._marker_orientations = math_utils.quat_from_angle_axis(
+            self.target_state[:, 2], self._marker_up
+        )
 
-        yaw_angles = torch.atan2(direction_unit[:, 1], direction_unit[:, 0])
-        self._marker_orientations = math_utils.quat_from_angle_axis(yaw_angles, self._marker_up)
-
-        target_pos_3d = torch.zeros_like(robot_pos_3d)
-        target_pos_3d[:, :2] = target_pos_world
-        target_pos_3d[:, 2] = env_origins[:, 2]
-
-        robot_pos_3d = robot_pos_3d.clone()
-        robot_pos_3d[:, 2] = env_origins[:, 2]
-        self._marker_locations = (robot_pos_3d + target_pos_3d) / 2.0
-
-        sphere_locations = torch.zeros_like(self._marker_locations)
-        sphere_locations[:, :2] = target_pos_world
-        sphere_locations[:, 2] = env_origins[:, 2]
-        sphere_loc = sphere_locations + self._marker_offset
-
-        sphere_orientations = torch.zeros((self.num_envs, 4), device=self.device)
-        sphere_orientations[:, 3] = 1.0
-
-        self.target_visualizer.visualize(sphere_loc, sphere_orientations)
+        self.target_visualizer.visualize(self._marker_locations, self._marker_orientations)
 
     @property
     def foot_positions_w(self) -> torch.Tensor:
