@@ -97,7 +97,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Curriculum completes over 40000 iterations (40000 * 32 = 480000 steps).
     # Beyond that, training continues at the highest difficulty level.
     enable_curriculum = True
-    curriculum_total_steps = 40000 * 32
+    curriculum_total_steps = 16000 * 32
     noise_curriculum_start_scale = 0.0
     noise_curriculum_end_scale = 1.0
     difficulty_override: int = -1  # -1 = use curriculum, 1-4 = force that difficulty level
@@ -299,7 +299,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
         markers={
             "target_arrow": sim_utils.UsdFileCfg(
                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
-                scale=(1.0, 0.1, 0.1),
+                scale=(0.5, 0.5, 0.2),
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)),
             ),
         },
