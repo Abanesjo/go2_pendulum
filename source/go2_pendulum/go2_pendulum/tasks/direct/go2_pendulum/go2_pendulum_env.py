@@ -91,16 +91,28 @@ class Go2PendulumEnv(DirectRLEnv):
             position_tolerance=0.2,
             enable_domain_randomization=True,
         ),
+        5: dict(
+            goal_randomization_dist_min=0.2,
+            goal_randomization_dist_max=0.3,
+            goal_yaw_randomization_min=math.radians(-180),
+            goal_yaw_randomization_max=math.radians(180),
+            pendulum_angle_min=0.0,
+            pendulum_angle_max=math.radians(20.0),
+            pendulum_joint_limit_min_rad=math.radians(-90.0),
+            pendulum_joint_limit_max_rad=math.radians(90.0),
+            termination_grace_s=0.1,
+            base_height_terminate_duration_s=0.1,
+            pendulum_terminate_angle_rad=math.radians(20.0),
+            pendulum_terminate_duration_s=5.0,
+            position_tolerance=0.2,
+            enable_domain_randomization=True,
+        ),
     }
 
     def __init__(self, cfg: Go2PendulumEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
         self._current_difficulty_level = 1
-        if self.cfg.difficulty_override >= 1:
-            self.cfg.enable_curriculum = False
-            self._current_difficulty_level = self.cfg.difficulty_override
-            self._apply_difficulty_preset(self.cfg.difficulty_override)
 
         # gait shaping
         self._feet_ids = []
@@ -190,6 +202,11 @@ class Go2PendulumEnv(DirectRLEnv):
             self._pendulum_ee_body_id = None
 
         self._apply_pendulum_joint_limits()
+
+        if self.cfg.difficulty_override >= 1:
+            self.cfg.enable_curriculum = False
+            self._current_difficulty_level = self.cfg.difficulty_override
+            self._apply_difficulty_preset(self.cfg.difficulty_override)
 
         # Derive action and joint-position bounds from soft joint limits.
         leg_joint_pos_limits = self.robot.data.soft_joint_pos_limits[:, self._leg_dof_ids, :]
