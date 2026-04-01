@@ -92,8 +92,8 @@ class Go2PendulumEnv(DirectRLEnv):
             enable_domain_randomization=True,
         ),
         5: dict(
-            goal_randomization_dist_min=0.2,
-            goal_randomization_dist_max=0.3,
+            goal_randomization_dist_min=0.3,
+            goal_randomization_dist_max=0.6,
             goal_yaw_randomization_min=math.radians(-180),
             goal_yaw_randomization_max=math.radians(180),
             pendulum_angle_min=0.0,

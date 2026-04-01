@@ -248,8 +248,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     push_interval_s_max = 10.0
     push_duration_s_min = 0.05
     push_duration_s_max = 0.15
-    push_force_x_range = (-25.0, 25.0)
-    push_force_y_range = (-25.0, 25.0)
+    push_force_x_range = (-10.0, 10.0)
+    push_force_y_range = (-10.0, 10.0)
     push_force_z_range = (0.0, 0.0)
     push_torque_x_range = (0.0, 0.0)
     push_torque_y_range = (0.0, 0.0)
