@@ -27,6 +27,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
     # Difficulty presets: values for each level, applied by the curriculum at runtime.
     _DIFFICULTY_PRESETS = {
+        # Baseline
         1: dict(
             goal_randomization_dist_min=0.0,
             goal_randomization_dist_max=0.0,
@@ -43,6 +44,7 @@ class Go2PendulumEnv(DirectRLEnv):
             position_tolerance=5.0,
             enable_domain_randomization=False,
         ),
+        # increase goal distance / angle
         2: dict(
             goal_randomization_dist_min=0.0,
             goal_randomization_dist_max=0.3,
@@ -53,12 +55,13 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_limit_min_rad=math.radians(-90.0),
             pendulum_joint_limit_max_rad=math.radians(90.0),
             termination_grace_s=0.1,
-            base_height_terminate_duration_s=0.1,
-            pendulum_terminate_angle_rad=math.radians(20.0),
+            base_height_terminate_duration_s=5.0,
+            pendulum_terminate_angle_rad=math.radians(60.0),
             pendulum_terminate_duration_s=5.0,
             position_tolerance=0.5,
             enable_domain_randomization=False,
         ),
+        # increase goal/angle; lower angle threshold
         3: dict(
             goal_randomization_dist_min=0.2,
             goal_randomization_dist_max=0.3,
@@ -66,15 +69,16 @@ class Go2PendulumEnv(DirectRLEnv):
             goal_yaw_randomization_max=math.radians(45),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(20.0),
-            pendulum_joint_limit_min_rad=math.radians(-20.0),
-            pendulum_joint_limit_max_rad=math.radians(20.0),
-            termination_grace_s=25.0,
-            base_height_terminate_duration_s=0.1,
-            pendulum_terminate_angle_rad=math.radians(5.0),
-            pendulum_terminate_duration_s=0.1,
+            pendulum_joint_limit_min_rad=math.radians(-90.0),
+            pendulum_joint_limit_max_rad=math.radians(90.0),
+            termination_grace_s=0.1,
+            base_height_terminate_duration_s=5.0,
+            pendulum_terminate_angle_rad=math.radians(45.0),
+            pendulum_terminate_duration_s=5.0,
             position_tolerance=0.2,
             enable_domain_randomization=False,
         ),
+        # increase angle of goal
         4: dict(
             goal_randomization_dist_min=0.2,
             goal_randomization_dist_max=0.3,
@@ -82,15 +86,16 @@ class Go2PendulumEnv(DirectRLEnv):
             goal_yaw_randomization_max=math.radians(180),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(20.0),
-            pendulum_joint_limit_min_rad=math.radians(-20.0),
-            pendulum_joint_limit_max_rad=math.radians(20.0),
-            termination_grace_s=25.0,
-            base_height_terminate_duration_s=0.1,
-            pendulum_terminate_angle_rad=math.radians(5.0),
-            pendulum_terminate_duration_s=0.1,
+            pendulum_joint_limit_min_rad=math.radians(-90.0),
+            pendulum_joint_limit_max_rad=math.radians(90.0),
+            termination_grace_s=0.1,
+            base_height_terminate_duration_s=5.0,
+            pendulum_terminate_angle_rad=math.radians(30.0),
+            pendulum_terminate_duration_s=5.0,
             position_tolerance=0.2,
             enable_domain_randomization=True,
         ),
+        # increase goal position/distance
         5: dict(
             goal_randomization_dist_min=0.3,
             goal_randomization_dist_max=0.6,
@@ -101,8 +106,8 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_limit_min_rad=math.radians(-90.0),
             pendulum_joint_limit_max_rad=math.radians(90.0),
             termination_grace_s=0.1,
-            base_height_terminate_duration_s=0.1,
-            pendulum_terminate_angle_rad=math.radians(20.0),
+            base_height_terminate_duration_s=5.0,
+            pendulum_terminate_angle_rad=math.radians(25.0),
             pendulum_terminate_duration_s=5.0,
             position_tolerance=0.2,
             enable_domain_randomization=True,
