@@ -208,6 +208,9 @@ class Go2PendulumEnv(DirectRLEnv):
 
         self._apply_pendulum_joint_limits()
 
+        if self.cfg.enable_curriculum:
+            self._apply_difficulty_preset(1)
+
         if self.cfg.difficulty_override >= 1:
             self.cfg.enable_curriculum = False
             self._current_difficulty_level = self.cfg.difficulty_override
