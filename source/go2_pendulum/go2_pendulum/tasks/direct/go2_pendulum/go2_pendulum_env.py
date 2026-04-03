@@ -39,8 +39,8 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_limit_max_rad=math.radians(20.0),
             termination_grace_s=0.1,
             base_height_terminate_duration_s=10.0,
-            pendulum_terminate_angle_rad=math.radians(60.0), #thus never
-            pendulum_terminate_duration_s=0.1,
+            pendulum_terminate_angle_rad=math.radians(60.0),
+            pendulum_terminate_duration_s=5.0,
             position_tolerance=5.0,
             enable_domain_randomization=False,
         ),
