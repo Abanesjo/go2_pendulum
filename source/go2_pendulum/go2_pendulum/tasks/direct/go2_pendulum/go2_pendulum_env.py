@@ -896,14 +896,16 @@ class Go2PendulumEnv(DirectRLEnv):
         )
 
         # Difficulty curriculum: evenly split into 4 levels.
-        if progress < 1 / 4:
+        if progress < 1 / 5:
             new_level = 1
-        elif progress < 2 / 4:
+        elif progress < 2 / 5:
             new_level = 2
-        elif progress < 3 / 4:
+        elif progress < 3 / 5:
             new_level = 3
-        else:
+        elif progress < 4 / 5:
             new_level = 4
+        else:
+            new_level = 5
 
         if new_level != self._current_difficulty_level:
             self._current_difficulty_level = new_level
