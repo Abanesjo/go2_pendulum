@@ -39,10 +39,10 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_limit_max_rad=math.radians(90.0),
             termination_grace_s=0.1,
             base_height_terminate_duration_s=10.0,
-            pendulum_terminate_angle_rad=math.radians(60.0), 
+            pendulum_terminate_angle_rad=math.radians(60.0),
             pendulum_terminate_duration_s=10.0,
             position_tolerance=5.0,
-            enable_domain_randomization=False,
+            enable_domain_randomization=True,
         ),
         # increase goal distance / angle; remove physical pendulum limit
         2: dict(
@@ -59,7 +59,7 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_angle_rad=math.radians(60.0),
             pendulum_terminate_duration_s=5.0,
             position_tolerance=0.5,
-            enable_domain_randomization=False,
+            enable_domain_randomization=True,
         ),
         # increase goal/angle; lower angle threshold
         3: dict(
@@ -76,7 +76,7 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_angle_rad=math.radians(45.0),
             pendulum_terminate_duration_s=3.0,
             position_tolerance=0.2,
-            enable_domain_randomization=False,
+            enable_domain_randomization=True,
         ),
         # increase angle of goal
         4: dict(
@@ -1170,11 +1170,12 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_action_count += 1
 
         # penalize non-vertical orientation (projected gravity on xy plane)
-        rew_orient = torch.sum(
+        orient_error = torch.sum(
             torch.square(self.robot.data.projected_gravity_b[:, :2]),
             dim=1,
         )
-        rew_orient = torch.exp(-rew_orient)
+        orient_sigma = max(self.cfg.orient_reward_sigma, 1e-6)
+        rew_orient = torch.exp(-(orient_error / orient_sigma))
 
         # penalize vertical velocity (z-component of base linear velocity)
         rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[:, 2])
@@ -1198,19 +1199,17 @@ class Go2PendulumEnv(DirectRLEnv):
         )
 
         if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
-            pendulum_ee_quat_w = self.robot.data.body_quat_w[:, self._pendulum_ee_body_id]
-            pendulum_ee_z_w = math_utils.quat_apply(
-                pendulum_ee_quat_w, self._world_up.unsqueeze(0).expand(self.num_envs, -1)
-            )
-            # Same spirit as base orient reward: penalize tilt of the frame z-axis in xy without angle conversions.
-            pendulum_upright_error = torch.sum(torch.square(pendulum_ee_z_w[:, :2]), dim=1)
+            pendulum_joint_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
+            pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
+            # Relative-to-base upright error: sum of squared joint angles. Decouples
+            # from world frame so the policy can't exploit base tilt to fake uprightness.
+            pendulum_upright_error = torch.sum(torch.square(pendulum_joint_pos), dim=1)
             pendulum_upright_sigma = max(self.cfg.pendulum_upright_reward_sigma, 1e-6)
             pendulum_upright_reward = torch.exp(-(pendulum_upright_error / pendulum_upright_sigma))
 
-            pendulum_joint_vel = self.robot.data.joint_vel[:, self._pendulum_dof_ids]
             pendulum_vel_norm = torch.linalg.norm(pendulum_joint_vel, dim=1)
             pendulum_velocity_reward = torch.sum(torch.square(pendulum_joint_vel), dim=1)
-            pendulum_angle_deg = torch.rad2deg(torch.linalg.norm(self.robot.data.joint_pos[:, self._pendulum_dof_ids], dim=1))
+            pendulum_angle_deg = torch.rad2deg(torch.linalg.norm(pendulum_joint_pos, dim=1))
             pendulum_speed_deg_s = torch.rad2deg(pendulum_vel_norm)
 
             # Match omniwheel: reward high when pendulum is balanced and/or base speed is low.

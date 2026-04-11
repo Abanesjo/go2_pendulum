@@ -136,7 +136,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_terminate_duration_s = 0.1
     position_tolerance = 5.0
     position_terminate_duration_s = 15.0
-    termination_penalty = -0.0
+    termination_penalty = -5.0
 
     # --- Observation noise (applied to actor obs only, scaled by observation_noise_scale) ---
     # TODO(human): Tune these noise magnitudes based on real sensor characteristics.
@@ -146,20 +146,20 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     body_ang_vel_noise = 0.2
     orientation_noise = 0.05
     position_noise = 0.01
-    pendulum_joint_pos_noise = 0.01
-    pendulum_joint_vel_noise = 1.5
+    pendulum_joint_pos_noise = 0.02
+    pendulum_joint_vel_noise = 1.0
 
     # Position tracking and heading alignment.
     position_reward_scale = 0.4
     position_reward_sigma = 0.3
-    progress_reward_scale = 100.0
+    progress_reward_scale = 10.0
     yaw_alignment_reward_scale = 0.3
     yaw_alignment_reward_sigma = 0.2
 
     # Pendulum/balance rewards.
     pendulum_upright_reward_scale = 0.6
-    pendulum_upright_reward_sigma = 0.052
-    pendulum_vel_reward_scale = -1.0
+    pendulum_upright_reward_sigma = 0.01
+    pendulum_vel_reward_scale = -0.1
     pendulum_vel_reward_sigma = 0.05  # unused with squared-velocity penalty
     balanced_movement_reward_scale = 0.1
 
@@ -173,6 +173,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     action_over_limit_reward_scale = -0.01
     torque_reward_scale = -0.0001
     orient_reward_scale = 0.3
+    orient_reward_sigma = 0.01
     lin_vel_z_reward_scale = -2.0
     dof_vel_reward_scale = -0.003
     dof_acc_reward_scale = -2.5e-7
@@ -184,11 +185,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     base_height_reward_scale = 0.2
 
     # --- Domain randomization (disabled by default, enable for sim-to-real) ---
-    enable_domain_randomization = False
+    enable_domain_randomization = True
     dr_seed_offset = 0
 
     # Material randomization.
-    enable_material_randomization = False
+    enable_material_randomization = True
     material_randomize_on_reset = True
     material_randomization_prob = 1.0
     material_num_buckets = 64
@@ -198,33 +199,33 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     material_make_consistent = True
 
     # Base mass / COM randomization.
-    enable_mass_randomization = False
+    enable_mass_randomization = True
     mass_randomize_body_name = "base"
-    mass_scale_range = (0.85, 1.15)
+    mass_scale_range = (0.9, 1.55)
     mass_recompute_inertia = True
-    enable_com_randomization = False
-    com_offset_x_range = (-0.015, 0.015)
-    com_offset_y_range = (-0.015, 0.015)
-    com_offset_z_range = (-0.01, 0.01)
+    enable_com_randomization = True
+    com_offset_x_range = (-0.03, 0.03)
+    com_offset_y_range = (-0.03, 0.03)
+    com_offset_z_range = (-0.02, 0.05)
 
     # Motor gain randomization.
-    enable_motor_gain_randomization = False
+    enable_motor_gain_randomization = True
     motor_gain_actuator_name = "base_legs"
     motor_stiffness_scale_range = (0.8, 1.2)
     motor_damping_scale_range = (0.8, 1.2)
     motor_gain_per_joint = True
 
     # Observation delay.
-    enable_obs_delay = False
-    obs_delay_steps_min = 0
-    obs_delay_steps_max = 0
+    enable_obs_delay = True
+    obs_delay_steps_min = 1
+    obs_delay_steps_max = 4
     obs_delay_randomize_per_reset = False
     obs_delay_jitter_prob = 0.0
     obs_delay_jitter_extra_max = 0
     obs_delay_proprio_only = True
 
     # Sensor bias and drift randomization.
-    enable_sensor_bias_drift = False
+    enable_sensor_bias_drift = True
     imu_lin_vel_bias_range = 0.05
     imu_ang_vel_bias_range = math.radians(3.0)
     imu_gravity_bias_range = 0.03
@@ -233,15 +234,15 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     imu_gravity_drift_std_per_s = 0.0
     encoder_joint_pos_bias_range = math.radians(1.0)
     encoder_joint_vel_bias_range = math.radians(5.0)
-    encoder_pendulum_pos_bias_range = math.radians(0.1)
-    encoder_pendulum_vel_bias_range = math.radians(1.0)
+    encoder_pendulum_pos_bias_range = math.radians(2.5)
+    encoder_pendulum_vel_bias_range = math.radians(3.0)
     encoder_joint_pos_drift_std_per_s = math.radians(0.0)
     encoder_joint_vel_drift_std_per_s = math.radians(0.0)
-    encoder_pendulum_pos_drift_std_per_s = math.radians(0.0)
-    encoder_pendulum_vel_drift_std_per_s = math.radians(0.0)
+    encoder_pendulum_pos_drift_std_per_s = math.radians(0.03)
+    encoder_pendulum_vel_drift_std_per_s = math.radians(0.1)
 
     # External wrench pushes.
-    enable_external_wrench_push = False
+    enable_external_wrench_push = True
     push_body_name = "base"
     push_is_global = True
     push_interval_s_min = 5.0
