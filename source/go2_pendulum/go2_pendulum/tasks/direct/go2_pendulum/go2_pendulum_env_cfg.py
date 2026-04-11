@@ -158,7 +158,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # Pendulum/balance rewards.
     pendulum_upright_reward_scale = 0.45
-    pendulum_upright_reward_sigma = 0.01
+    pendulum_upright_reward_sigma = 0.15
     pendulum_vel_reward_scale = -0.1
     pendulum_vel_reward_sigma = 0.05  # unused with squared-velocity penalty
     balanced_movement_reward_scale = 0.1
@@ -217,8 +217,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # Observation delay.
     enable_obs_delay = True
-    obs_delay_steps_min = 1
-    obs_delay_steps_max = 4
+    obs_delay_steps_min = 0
+    obs_delay_steps_max = 1
     obs_delay_randomize_per_reset = False
     obs_delay_jitter_prob = 0.0
     obs_delay_jitter_extra_max = 0
