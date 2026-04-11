@@ -157,7 +157,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     yaw_alignment_reward_sigma = 0.2
 
     # Pendulum/balance rewards.
-    pendulum_upright_reward_scale = 0.6
+    pendulum_upright_reward_scale = 0.45
     pendulum_upright_reward_sigma = 0.01
     pendulum_vel_reward_scale = -0.1
     pendulum_vel_reward_sigma = 0.05  # unused with squared-velocity penalty
@@ -172,8 +172,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     action_soft_limit = 2.0
     action_over_limit_reward_scale = -0.01
     torque_reward_scale = -0.0001
-    orient_reward_scale = 0.3
-    orient_reward_sigma = 0.01
+    orient_reward_scale = 0.8
+    orient_reward_sigma = 0.05
     lin_vel_z_reward_scale = -2.0
     dof_vel_reward_scale = -0.003
     dof_acc_reward_scale = -2.5e-7

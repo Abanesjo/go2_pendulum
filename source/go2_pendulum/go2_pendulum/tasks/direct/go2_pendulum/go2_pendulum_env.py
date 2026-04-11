@@ -43,6 +43,13 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_duration_s=10.0,
             position_tolerance=5.0,
             enable_domain_randomization=True,
+            mass_scale_range=(0.95, 1.1),
+            com_offset_x_range=(-0.01, 0.01),
+            com_offset_y_range=(-0.01, 0.01),
+            com_offset_z_range=(-0.005, 0.015),
+            enable_external_wrench_push=False,
+            motor_stiffness_scale_range=(0.9, 1.1),
+            motor_damping_scale_range=(0.9, 1.1),
         ),
         # increase goal distance / angle; remove physical pendulum limit
         2: dict(
@@ -60,6 +67,13 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_duration_s=5.0,
             position_tolerance=0.5,
             enable_domain_randomization=True,
+            mass_scale_range=(0.92, 1.25),
+            com_offset_x_range=(-0.015, 0.015),
+            com_offset_y_range=(-0.015, 0.015),
+            com_offset_z_range=(-0.01, 0.025),
+            enable_external_wrench_push=False,
+            motor_stiffness_scale_range=(0.85, 1.15),
+            motor_damping_scale_range=(0.85, 1.15),
         ),
         # increase goal/angle; lower angle threshold
         3: dict(
@@ -77,6 +91,15 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_duration_s=3.0,
             position_tolerance=0.2,
             enable_domain_randomization=True,
+            mass_scale_range=(0.9, 1.4),
+            com_offset_x_range=(-0.02, 0.02),
+            com_offset_y_range=(-0.02, 0.02),
+            com_offset_z_range=(-0.015, 0.035),
+            enable_external_wrench_push=True,
+            push_force_x_range=(-5.0, 5.0),
+            push_force_y_range=(-5.0, 5.0),
+            motor_stiffness_scale_range=(0.8, 1.2),
+            motor_damping_scale_range=(0.8, 1.2),
         ),
         # increase angle of goal
         4: dict(
@@ -94,6 +117,15 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_duration_s=2.0,
             position_tolerance=0.2,
             enable_domain_randomization=True,
+            mass_scale_range=(0.9, 1.55),
+            com_offset_x_range=(-0.03, 0.03),
+            com_offset_y_range=(-0.03, 0.03),
+            com_offset_z_range=(-0.02, 0.05),
+            enable_external_wrench_push=True,
+            push_force_x_range=(-10.0, 10.0),
+            push_force_y_range=(-10.0, 10.0),
+            motor_stiffness_scale_range=(0.8, 1.2),
+            motor_damping_scale_range=(0.8, 1.2),
         ),
         # increase goal position/distance
         5: dict(
@@ -111,6 +143,15 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_duration_s=2.0,
             position_tolerance=0.2,
             enable_domain_randomization=True,
+            mass_scale_range=(0.9, 1.55),
+            com_offset_x_range=(-0.03, 0.03),
+            com_offset_y_range=(-0.03, 0.03),
+            com_offset_z_range=(-0.02, 0.05),
+            enable_external_wrench_push=True,
+            push_force_x_range=(-10.0, 10.0),
+            push_force_y_range=(-10.0, 10.0),
+            motor_stiffness_scale_range=(0.8, 1.2),
+            motor_damping_scale_range=(0.8, 1.2),
         ),
     }
 
