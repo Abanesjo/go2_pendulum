@@ -79,8 +79,8 @@ class Go2PendulumEnv(DirectRLEnv):
         3: dict(
             goal_randomization_dist_min=0.1,
             goal_randomization_dist_max=0.3,
-            goal_yaw_randomization_min=math.radians(-45),
-            goal_yaw_randomization_max=math.radians(45),
+            goal_yaw_randomization_min=math.radians(-30),
+            goal_yaw_randomization_max=math.radians(30),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(15.0),
             pendulum_joint_limit_min_rad=math.radians(-90.0),
@@ -103,8 +103,8 @@ class Go2PendulumEnv(DirectRLEnv):
         4: dict(
             goal_randomization_dist_min=0.2,
             goal_randomization_dist_max=0.5,
-            goal_yaw_randomization_min=math.radians(-120),
-            goal_yaw_randomization_max=math.radians(120),
+            goal_yaw_randomization_min=math.radians(-45),
+            goal_yaw_randomization_max=math.radians(-45),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(20.0),
             pendulum_joint_limit_min_rad=math.radians(-90.0),
@@ -128,9 +128,9 @@ class Go2PendulumEnv(DirectRLEnv):
         # Full difficulty. Stronger pushes, max DR, tightest termination.
         5: dict(
             goal_randomization_dist_min=0.3,
-            goal_randomization_dist_max=0.6,
-            goal_yaw_randomization_min=math.radians(-180),
-            goal_yaw_randomization_max=math.radians(180),
+            goal_randomization_dist_max=0.5,
+            goal_yaw_randomization_min=math.radians(-60),
+            goal_yaw_randomization_max=math.radians(60),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(20.0),
             pendulum_joint_limit_min_rad=math.radians(-90.0),
