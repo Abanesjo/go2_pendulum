@@ -27,7 +27,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
     # Difficulty presets: values for each level, applied by the curriculum at runtime.
     _DIFFICULTY_PRESETS = {
-        # Baseline, with limits
+        # Stand and balance only. No goals, tiny spawn perturbation, light DR.
         1: dict(
             goal_randomization_dist_min=0.0,
             goal_randomization_dist_max=0.0,
@@ -51,14 +51,14 @@ class Go2PendulumEnv(DirectRLEnv):
             motor_stiffness_scale_range=(0.9, 1.1),
             motor_damping_scale_range=(0.9, 1.1),
         ),
-        # increase goal distance / angle; remove physical pendulum limit
+        # Learn to take small steps. Small goals, slightly larger spawn angle. No pushes.
         2: dict(
             goal_randomization_dist_min=0.0,
-            goal_randomization_dist_max=0.1,
-            goal_yaw_randomization_min=math.radians(-30),
-            goal_yaw_randomization_max=math.radians(30),
+            goal_randomization_dist_max=0.15,
+            goal_yaw_randomization_min=math.radians(-15),
+            goal_yaw_randomization_max=math.radians(15),
             pendulum_angle_min=0.0,
-            pendulum_angle_max=math.radians(10.0),
+            pendulum_angle_max=math.radians(8.0),
             pendulum_joint_limit_min_rad=math.radians(-90.0),
             pendulum_joint_limit_max_rad=math.radians(90.0),
             termination_grace_s=0.1,
@@ -67,46 +67,44 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_duration_s=5.0,
             position_tolerance=0.5,
             enable_domain_randomization=True,
-            mass_scale_range=(0.92, 1.25),
+            mass_scale_range=(0.92, 1.2),
             com_offset_x_range=(-0.015, 0.015),
             com_offset_y_range=(-0.015, 0.015),
-            com_offset_z_range=(-0.01, 0.025),
+            com_offset_z_range=(-0.01, 0.02),
             enable_external_wrench_push=False,
             motor_stiffness_scale_range=(0.85, 1.15),
             motor_damping_scale_range=(0.85, 1.15),
         ),
-        # increase goal/angle; lower angle threshold
+        # Walk further, turn more, larger pendulum perturbation. Still no pushes.
         3: dict(
-            goal_randomization_dist_min=0.2,
+            goal_randomization_dist_min=0.1,
             goal_randomization_dist_max=0.3,
-            goal_yaw_randomization_min=math.radians(-60),
-            goal_yaw_randomization_max=math.radians(60),
+            goal_yaw_randomization_min=math.radians(-45),
+            goal_yaw_randomization_max=math.radians(45),
             pendulum_angle_min=0.0,
-            pendulum_angle_max=math.radians(20.0),
+            pendulum_angle_max=math.radians(15.0),
             pendulum_joint_limit_min_rad=math.radians(-90.0),
             pendulum_joint_limit_max_rad=math.radians(90.0),
             termination_grace_s=0.1,
             base_height_terminate_duration_s=5.0,
             pendulum_terminate_angle_rad=math.radians(45.0),
             pendulum_terminate_duration_s=3.0,
-            position_tolerance=0.2,
+            position_tolerance=0.3,
             enable_domain_randomization=True,
-            mass_scale_range=(0.9, 1.4),
+            mass_scale_range=(0.9, 1.35),
             com_offset_x_range=(-0.02, 0.02),
             com_offset_y_range=(-0.02, 0.02),
-            com_offset_z_range=(-0.015, 0.035),
-            enable_external_wrench_push=True,
-            push_force_x_range=(-5.0, 5.0),
-            push_force_y_range=(-5.0, 5.0),
+            com_offset_z_range=(-0.015, 0.03),
+            enable_external_wrench_push=False,
             motor_stiffness_scale_range=(0.8, 1.2),
             motor_damping_scale_range=(0.8, 1.2),
         ),
-        # increase angle of goal
+        # Full goal range, full spawn angle. Introduce gentle pushes. Tighter termination.
         4: dict(
             goal_randomization_dist_min=0.2,
-            goal_randomization_dist_max=0.3,
-            goal_yaw_randomization_min=math.radians(-90),
-            goal_yaw_randomization_max=math.radians(90),
+            goal_randomization_dist_max=0.5,
+            goal_yaw_randomization_min=math.radians(-120),
+            goal_yaw_randomization_max=math.radians(120),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(20.0),
             pendulum_joint_limit_min_rad=math.radians(-90.0),
@@ -117,17 +115,17 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_duration_s=2.0,
             position_tolerance=0.2,
             enable_domain_randomization=True,
-            mass_scale_range=(0.9, 1.55),
+            mass_scale_range=(0.9, 1.5),
             com_offset_x_range=(-0.03, 0.03),
             com_offset_y_range=(-0.03, 0.03),
-            com_offset_z_range=(-0.02, 0.05),
+            com_offset_z_range=(-0.02, 0.04),
             enable_external_wrench_push=True,
-            push_force_x_range=(-10.0, 10.0),
-            push_force_y_range=(-10.0, 10.0),
+            push_force_x_range=(-5.0, 5.0),
+            push_force_y_range=(-5.0, 5.0),
             motor_stiffness_scale_range=(0.8, 1.2),
             motor_damping_scale_range=(0.8, 1.2),
         ),
-        # increase goal position/distance
+        # Full difficulty. Stronger pushes, max DR, tightest termination.
         5: dict(
             goal_randomization_dist_min=0.3,
             goal_randomization_dist_max=0.6,
