@@ -74,8 +74,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     episode_length_s = 20
     action_space = 12
     action_scale = 0.25
-    enable_action_clipping = False
-    action_clip = 1.0
     enable_action_delay = True
     action_delay_steps_min = 0
     action_delay_steps_max = 1
@@ -83,15 +81,10 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_per_joint_action_bounds = True
     action_bound_margin = 1.0
     enable_desired_joint_pos_hard_clamp = True
-    action_over_limit_power = 2.0
     observation_space = 48 + 4 + 4
     state_space = 48 + 4 + 4  # Asymmetric actor-critic: critic obs dimension (set in __post_init__)
     debug_vis = True
     use_pendulum = True
-
-    # Action low-pass filter.
-    enable_action_lpf = False
-    action_lpf_cutoff_hz = 8.0
 
     # --- Curriculum (noise ramp + difficulty progression) ---
     # Curriculum completes over 40000 iterations (40000 * 32 = 480000 steps).
@@ -100,7 +93,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     curriculum_total_steps = 75000 * 32
     noise_curriculum_start_scale = 0.0
     noise_curriculum_end_scale = 1.0
-    difficulty_override: int = 5  # -1 = use curriculum, 1-4 = force that difficulty level
+    difficulty_override: int = -1  # -1 = use curriculum, 1-4 = force that difficulty level
 
     # --- Difficulty-dependent defaults (level 1 initial values) ---
     # These are updated at runtime by the difficulty curriculum.
@@ -169,8 +162,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     feet_air_time_reward_scale = 0.1
     action_magnitude_reward_scale = -0.1
     action_rate_reward_scale = -0.01
-    action_soft_limit = 2.0
-    action_over_limit_reward_scale = -0.01
     torque_reward_scale = -0.0001
     orient_reward_scale = 0.8
     orient_reward_sigma = 0.05

@@ -206,8 +206,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self._action_dim = gym.spaces.flatdim(self.single_action_space)
         if self.cfg.action_scale <= 0.0:
             raise ValueError(f"action_scale must be > 0. Got {self.cfg.action_scale}.")
-        if self.cfg.enable_action_lpf and self.cfg.action_lpf_cutoff_hz <= 0.0:
-            raise ValueError(f"action_lpf_cutoff_hz must be > 0. Got {self.cfg.action_lpf_cutoff_hz}.")
         if self.cfg.action_delay_steps_min < 0:
             raise ValueError(f"action_delay_steps_min must be >= 0. Got {self.cfg.action_delay_steps_min}.")
         if self.cfg.action_delay_steps_max < self.cfg.action_delay_steps_min:
@@ -218,10 +216,6 @@ class Go2PendulumEnv(DirectRLEnv):
         if self.cfg.action_bound_margin <= 0.0:
             raise ValueError(f"action_bound_margin must be > 0. Got {self.cfg.action_bound_margin}.")
         self._validate_domain_randomization_cfg()
-        control_dt = self.cfg.sim.dt * self.cfg.decimation
-        self._action_lpf_alpha = (
-            math.exp(-2.0 * math.pi * self.cfg.action_lpf_cutoff_hz * control_dt) if self.cfg.enable_action_lpf else 0.0
-        )
         self._max_action_delay_steps = self.cfg.action_delay_steps_max if self.cfg.enable_action_delay else 0
         seed_cfg = getattr(self.cfg, "seed", None)
         seed = 0 if seed_cfg is None else int(seed_cfg)
@@ -267,21 +261,11 @@ class Go2PendulumEnv(DirectRLEnv):
             action_half_range = 0.5 * (action_high - action_low) * self.cfg.action_bound_margin
             self._action_low = action_center - action_half_range
             self._action_high = action_center + action_half_range
-        else:
-            self._action_low = torch.zeros((self.num_envs, self._action_dim), device=self.device)
-            self._action_high = torch.zeros_like(self._action_low)
-            if self.cfg.enable_action_clipping:
-                self._action_low.fill_(-self.cfg.action_clip)
-                self._action_high.fill_(self.cfg.action_clip)
-            else:
-                self._action_low.fill_(-self.cfg.action_soft_limit)
-                self._action_high.fill_(self.cfg.action_soft_limit)
 
         # Joint position command (deviation from default joint positions).
         self._actions_raw_policy = torch.zeros(self.num_envs, self._action_dim, device=self.device)
         self._actions_bounded = torch.zeros_like(self._actions_raw_policy)
         self._actions_delayed = torch.zeros_like(self._actions_raw_policy)
-        self._actions_filtered = torch.zeros_like(self._actions_raw_policy)
         self._actions_executed = torch.zeros_like(self._actions_raw_policy)
         self._processed_actions = torch.zeros_like(self._actions_raw_policy)
         self._previous_actions = torch.zeros_like(self._actions_raw_policy)
@@ -328,7 +312,6 @@ class Go2PendulumEnv(DirectRLEnv):
             "balanced_movement",
             "action_magnitude",
             "rew_action_rate",
-            "action_over_limit",
             "torque",
             "orient",
             "base_height",
@@ -353,10 +336,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_pendulum_angle_deg_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._episode_pendulum_speed_deg_s_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self._episode_pendulum_speed_deg_s_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
-        self._episode_mean_action_constraint_violation_abs_sum = torch.zeros(
-            self.num_envs, dtype=torch.float, device=self.device
-        )
-        self._episode_action_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._prev_position_error = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
 
         self.last_actions = torch.zeros(
@@ -882,8 +861,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self._actions_raw_policy = actions.clone()
         if self.cfg.enable_per_joint_action_bounds:
             self._actions_bounded = torch.clamp(self._actions_raw_policy, min=self._action_low, max=self._action_high)
-        elif self.cfg.enable_action_clipping:
-            self._actions_bounded = torch.clamp(self._actions_raw_policy, -self.cfg.action_clip, self.cfg.action_clip)
         else:
             self._actions_bounded = self._actions_raw_policy.clone()
 
@@ -896,15 +873,7 @@ class Go2PendulumEnv(DirectRLEnv):
         else:
             self._actions_delayed = self._actions_bounded.clone()
 
-        if self.cfg.enable_action_lpf:
-            self._actions_filtered = (
-                self._action_lpf_alpha * self._actions_filtered + (1.0 - self._action_lpf_alpha) * self._actions_delayed
-            )
-            if self.cfg.enable_per_joint_action_bounds:
-                self._actions_filtered = torch.clamp(self._actions_filtered, min=self._action_low, max=self._action_high)
-            self._actions_executed = self._actions_filtered.clone()
-        else:
-            self._actions_executed = self._actions_delayed.clone()
+        self._actions_executed = self._actions_delayed.clone()
 
         self._processed_actions = self.cfg.action_scale * self._actions_executed
 
@@ -1200,13 +1169,6 @@ class Go2PendulumEnv(DirectRLEnv):
             torch.square(self._actions_executed - 2 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]),
             dim=1,
         ) * (self.cfg.action_scale**2)
-        raw_low_violation = torch.relu(self._action_low - self._actions_raw_policy)
-        raw_high_violation = torch.relu(self._actions_raw_policy - self._action_high)
-        action_violation = raw_low_violation + raw_high_violation
-        rew_action_over_limit = torch.sum(torch.pow(action_violation, self.cfg.action_over_limit_power), dim=1)
-
-        self._episode_mean_action_constraint_violation_abs_sum += torch.mean(torch.abs(action_violation), dim=1)
-        self._episode_action_count += 1
 
         # penalize non-vertical orientation (projected gravity on xy plane)
         orient_error = torch.sum(
@@ -1320,7 +1282,6 @@ class Go2PendulumEnv(DirectRLEnv):
             "balanced_movement": balanced_movement_reward * self.cfg.balanced_movement_reward_scale,
             "action_magnitude": rew_action_magnitude * self.cfg.action_magnitude_reward_scale,
             "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
-            "action_over_limit": rew_action_over_limit * self.cfg.action_over_limit_reward_scale,
             "torque": rew_torque * self.cfg.torque_reward_scale,
             "orient": rew_orient * self.cfg.orient_reward_scale,
             "base_height": base_height_reward * self.cfg.base_height_reward_scale,
@@ -1454,7 +1415,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self._actions_raw_policy[env_ids] = 0.0
         self._actions_bounded[env_ids] = 0.0
         self._actions_delayed[env_ids] = 0.0
-        self._actions_filtered[env_ids] = 0.0
         self._actions_executed[env_ids] = 0.0
         self._previous_actions[env_ids] = 0.0
         self._processed_actions[env_ids] = 0.0
@@ -1615,13 +1575,6 @@ class Go2PendulumEnv(DirectRLEnv):
         extras["Episode_Metric/mean_pendulum_speed_deg_s"] = mean_pendulum_speed_deg_s.item()
         self._episode_pendulum_speed_deg_s_sum[env_ids] = 0.0
         self._episode_pendulum_speed_deg_s_count[env_ids] = 0
-        action_steps = torch.clamp(self._episode_action_count[env_ids], min=1).to(dtype=torch.float)
-        mean_action_constraint_violation_abs = torch.mean(
-            self._episode_mean_action_constraint_violation_abs_sum[env_ids] / action_steps
-        )
-        extras["Episode_Metric/mean_action_constraint_violation_abs"] = mean_action_constraint_violation_abs.item()
-        self._episode_mean_action_constraint_violation_abs_sum[env_ids] = 0.0
-        self._episode_action_count[env_ids] = 0
         if self.cfg.enable_curriculum and self.cfg.curriculum_total_steps > 0:
             extras["Episode_Metric/curriculum_progress"] = min(1.0, max(0.0, self.common_step_counter / self.cfg.curriculum_total_steps))
         else:
