@@ -103,15 +103,15 @@ The actor and critic both use a 56-D observation vector with the same ordering:
 - `6:9`: projected gravity in base frame `[gx, gy, gz]`
 - `9:12`: target-state error in base frame `[target_x_error_body, target_y_error_body, wrap_to_pi(target_yaw - base_yaw)]`
 - `12:24`: leg joint position offsets from the default pose in this exact joint order:
-  `FL_hip_joint, FL_thigh_joint, FL_calf_joint, FR_hip_joint, FR_thigh_joint, FR_calf_joint, RL_hip_joint, RL_thigh_joint, RL_calf_joint, RR_hip_joint, RR_thigh_joint, RR_calf_joint`
+  `FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint, FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint, FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint`
 - `24:36`: leg joint velocities in the same exact order:
-  `FL_hip_joint, FL_thigh_joint, FL_calf_joint, FR_hip_joint, FR_thigh_joint, FR_calf_joint, RL_hip_joint, RL_thigh_joint, RL_calf_joint, RR_hip_joint, RR_thigh_joint, RR_calf_joint`
+  `FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint, FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint, FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint`
 - `36:38`: pendulum joint positions:
   `pendulum_joint1, pendulum_joint2`
 - `38:40`: pendulum joint velocities:
   `pendulum_joint1, pendulum_joint2`
 - `40:52`: latest executed action command in the same exact leg-joint order:
-  `FL_hip_joint, FL_thigh_joint, FL_calf_joint, FR_hip_joint, FR_thigh_joint, FR_calf_joint, RL_hip_joint, RL_thigh_joint, RL_calf_joint, RR_hip_joint, RR_thigh_joint, RR_calf_joint`
+  `FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint, FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint, FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint`
 - `52:56`: gait clock inputs:
   `sin(phase_FL), sin(phase_FR), sin(phase_RL), sin(phase_RR)`
 
@@ -125,7 +125,7 @@ Important details:
 
 The policy outputs a 12-D floating-point action ordered as:
 
-`FL_hip_joint, FL_thigh_joint, FL_calf_joint, FR_hip_joint, FR_thigh_joint, FR_calf_joint, RL_hip_joint, RL_thigh_joint, RL_calf_joint, RR_hip_joint, RR_thigh_joint, RR_calf_joint`
+`FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint, FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint, FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint`
 
 These values are interpreted as joint-position offsets relative to the default standing pose, not absolute joint targets.
 
@@ -145,17 +145,16 @@ The current default joint-position offsets are:
 
 ```text
 [
-   0.1,  0.8, -1.5,   # FL_hip_joint, FL_thigh_joint, FL_calf_joint
-  -0.1,  0.8, -1.5,   # FR_hip_joint, FR_thigh_joint, FR_calf_joint
-   0.1,  1.0, -1.5,   # RL_hip_joint, RL_thigh_joint, RL_calf_joint
-  -0.1,  1.0, -1.5,   # RR_hip_joint, RR_thigh_joint, RR_calf_joint
+   0.1, -0.1,  0.1, -0.1,   # FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint
+   0.8,  0.8,  1.0,  1.0,   # FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint
+  -1.5, -1.5, -1.5, -1.5,   # FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint
 ]
 ```
 
 Example:
 
 ```text
-q_des_FL_thigh = 0.8 + 0.25 * action[FL_thigh_joint]
+q_des_FR_thigh = 0.8 + 0.25 * action[FR_thigh_joint]
 ```
 
 ## Using A Trained Policy

@@ -20,16 +20,14 @@
 #             wrap_to_pi(target_yaw - base_yaw),
 #          ]
 #   12:24  leg joint position offsets from the default pose       [
-#             FL_hip_joint, FL_thigh_joint, FL_calf_joint,
-#             FR_hip_joint, FR_thigh_joint, FR_calf_joint,
-#             RL_hip_joint, RL_thigh_joint, RL_calf_joint,
-#             RR_hip_joint, RR_thigh_joint, RR_calf_joint,
+#             FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint,
+#             FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint,
+#             FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint,
 #          ]
 #   24:36  leg joint velocities                                   [
-#             FL_hip_joint, FL_thigh_joint, FL_calf_joint,
-#             FR_hip_joint, FR_thigh_joint, FR_calf_joint,
-#             RL_hip_joint, RL_thigh_joint, RL_calf_joint,
-#             RR_hip_joint, RR_thigh_joint, RR_calf_joint,
+#             FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint,
+#             FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint,
+#             FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint,
 #          ]
 #   36:38  pendulum joint positions                                [
 #             pendulum_joint1, pendulum_joint2,
@@ -38,10 +36,9 @@
 #             pendulum_joint1, pendulum_joint2,
 #          ]
 #   40:52  latest executed action command                          [
-#             FL_hip_joint, FL_thigh_joint, FL_calf_joint,
-#             FR_hip_joint, FR_thigh_joint, FR_calf_joint,
-#             RL_hip_joint, RL_thigh_joint, RL_calf_joint,
-#             RR_hip_joint, RR_thigh_joint, RR_calf_joint,
+#             FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint,
+#             FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint,
+#             FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint,
 #          ]
 #   52:56  gait clock inputs                                       [
 #             sin(phase_FL), sin(phase_FR), sin(phase_RL), sin(phase_RR),
@@ -57,10 +54,9 @@
 # Action layout:
 #   The policy outputs 12 floating-point values ordered as
 #     [
-#       FL_hip_joint, FL_thigh_joint, FL_calf_joint,
-#       FR_hip_joint, FR_thigh_joint, FR_calf_joint,
-#       RL_hip_joint, RL_thigh_joint, RL_calf_joint,
-#       RR_hip_joint, RR_thigh_joint, RR_calf_joint,
+#       FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint,
+#       FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint,
+#       FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint,
 #     ]
 #
 # Action semantics:
@@ -76,17 +72,16 @@
 #
 #   - The current default joint-position offsets used by this task are
 #       [
-#          0.1,  0.8, -1.5,   # FL_hip_joint, FL_thigh_joint, FL_calf_joint
-#         -0.1,  0.8, -1.5,   # FR_hip_joint, FR_thigh_joint, FR_calf_joint
-#          0.1,  1.0, -1.5,   # RL_hip_joint, RL_thigh_joint, RL_calf_joint
-#         -0.1,  1.0, -1.5,   # RR_hip_joint, RR_thigh_joint, RR_calf_joint
+#          0.1, -0.1,  0.1, -0.1,   # FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint
+#          0.8,  0.8,  1.0,  1.0,   # FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint
+#         -1.5, -1.5, -1.5, -1.5,   # FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint
 #       ]
 #
 #   Example:
-#     if the policy outputs a_FL_thigh = 0.4, then the desired FL thigh target
+#     if the policy outputs a_FR_thigh = 0.4, then the desired FR thigh target
 #     sent to the low-level joint position controller is
 #
-#       q_des_FL_thigh = 0.8 + 0.25 * 0.4 = 0.9 rad
+#       q_des_FR_thigh = 0.8 + 0.25 * 0.4 = 0.9 rad
 #
 # Inference recipe:
 #   1. Build the 56-D observation in the exact order above.
@@ -117,6 +112,42 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 GO2_PENDULUM_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_model", "go2_pendulum.usd")
 GO2_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_model", "go2.usd")
 
+GO2_LEG_JOINT_NAMES = [
+    "FL_hip_joint",
+    "FR_hip_joint",
+    "RL_hip_joint",
+    "RR_hip_joint",
+    "FL_thigh_joint",
+    "FR_thigh_joint",
+    "RL_thigh_joint",
+    "RR_thigh_joint",
+    "FL_calf_joint",
+    "FR_calf_joint",
+    "RL_calf_joint",
+    "RR_calf_joint",
+]
+
+GO2_PENDULUM_JOINT_NAMES = ["pendulum_joint1", "pendulum_joint2"]
+
+GO2_DEFAULT_JOINT_POS = {
+    "FL_hip_joint": 0.1,
+    "FL_thigh_joint": 0.8,
+    "FL_calf_joint": -1.5,
+    "FR_hip_joint": -0.1,
+    "FR_thigh_joint": 0.8,
+    "FR_calf_joint": -1.5,
+    "RL_hip_joint": 0.1,
+    "RL_thigh_joint": 1.0,
+    "RL_calf_joint": -1.5,
+    "RR_hip_joint": -0.1,
+    "RR_thigh_joint": 1.0,
+    "RR_calf_joint": -1.5,
+    "pendulum_joint1": 0.0,
+    "pendulum_joint2": 0.0,
+}
+
+GO2_DEFAULT_JOINT_VEL = {joint_name: 0.0 for joint_name in GO2_DEFAULT_JOINT_POS}
+
 GO2_PENDULUM_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
         usd_path=GO2_PENDULUM_USD_PATH,
@@ -138,19 +169,13 @@ GO2_PENDULUM_CFG = ArticulationCfg(
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.4),
-        joint_pos={
-            ".*L_hip_joint": 0.1,
-            ".*R_hip_joint": -0.1,
-            "F[L,R]_thigh_joint": 0.8,
-            "R[L,R]_thigh_joint": 1.0,
-            ".*_calf_joint": -1.5,
-        },
-        joint_vel={".*": 0.0},
+        joint_pos=GO2_DEFAULT_JOINT_POS,
+        joint_vel=GO2_DEFAULT_JOINT_VEL,
     ),
     soft_joint_pos_limit_factor=0.9,
     actuators={
         "base_legs": DCMotorCfg(
-            joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
+            joint_names_expr=GO2_LEG_JOINT_NAMES,
             effort_limit=23.5,
             saturation_effort=23.5,
             velocity_limit=30.0,
@@ -167,7 +192,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Core environment interface.
     decimation = 4
     episode_length_s = 20
-    action_space = 12
+    leg_joint_names = GO2_LEG_JOINT_NAMES
+    action_space = len(leg_joint_names)
     action_scale = 0.25
     enable_action_delay = True
     action_delay_steps_min = 0
@@ -203,7 +229,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     goal_yaw_randomization_max = math.radians(0)
 
     # Pendulum reset angle sampling.
-    pendulum_joint_names = ["pendulum_joint1", "pendulum_joint2"]
+    pendulum_joint_names = GO2_PENDULUM_JOINT_NAMES
     pendulum_angle_min = math.radians(0.0)
     pendulum_angle_max = math.radians(0.0)
 
@@ -391,6 +417,18 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
+
+        if len(self.leg_joint_names) != self.action_space:
+            raise ValueError(
+                f"action_space must match the number of configured leg joints. Got {self.action_space} and"
+                f" {len(self.leg_joint_names)} leg joints."
+            )
+        if len(set(self.leg_joint_names)) != len(self.leg_joint_names):
+            raise ValueError("leg_joint_names contains duplicates. It must define a unique canonical joint order.")
+        if len(set(self.pendulum_joint_names)) != len(self.pendulum_joint_names):
+            raise ValueError(
+                "pendulum_joint_names contains duplicates. It must define a unique canonical pendulum joint order."
+            )
 
         # Keep pendulum toggle behavior available, but disable by default.
         if not self.use_pendulum:

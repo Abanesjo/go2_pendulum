@@ -157,11 +157,13 @@ class Go2PendulumEnv(DirectRLEnv):
             requires_grad=False,
         )
 
-        # Resolve leg joints.
+        # Resolve leg joints in the exact configured policy/action order.
         leg_joint_ids = []
-        for idx, name in enumerate(self.robot.joint_names):
-            if name.endswith("_hip_joint") or name.endswith("_thigh_joint") or name.endswith("_calf_joint"):
-                leg_joint_ids.append(idx)
+        for joint_name in self.cfg.leg_joint_names:
+            joint_idx, _ = self.robot.find_joints(joint_name)
+            if len(joint_idx) != 1:
+                raise RuntimeError(f"Expected exactly one joint for '{joint_name}', got {joint_idx}.")
+            leg_joint_ids.append(joint_idx[0])
         if len(leg_joint_ids) != self.cfg.action_space:
             raise RuntimeError(
                 "Leg joint count does not match action space: "
