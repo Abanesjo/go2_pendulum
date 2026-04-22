@@ -59,7 +59,7 @@ The Go2 + pendulum USD lives at `source/go2_pendulum/go2_pendulum/tasks/direct/g
 
 ## Key Design Details
 
-- **Action pipeline:** raw policy output → per-joint bounding → delay buffer → optional LPF → joint position targets. Actions are offsets from default joint positions scaled by `action_scale`.
+- **Action pipeline:** raw policy output → delay buffer → joint position targets. Actions are delayed offsets from default joint positions scaled by `action_scale`.
 - **Observation space:** 48 (base state + leg joints) + 4 (clock/gait) + 2×N_pendulum_joints = 56 dims. Both actor and critic use the same structure.
 - **Target definition:** `target_state = [x_d, y_d, yaw_d]` in the environment frame. `goal_randomization_angle_*` controls the bearing of the target position, while `goal_yaw_randomization_*` controls the desired robot heading at that target.
 - **Domain randomization:** material friction, base mass/COM, motor gains, sensor bias+drift, external wrench pushes, observation delay — all configured as flat fields on the env cfg (disabled by default, ready to enable for sim-to-real).

@@ -178,8 +178,6 @@ class Go2PendulumEnv(DirectRLEnv):
                 "action_delay_steps_max must be >= action_delay_steps_min. "
                 f"Got {self.cfg.action_delay_steps_max} < {self.cfg.action_delay_steps_min}."
             )
-        if self.cfg.action_bound_margin <= 0.0:
-            raise ValueError(f"action_bound_margin must be > 0. Got {self.cfg.action_bound_margin}.")
         self._validate_domain_randomization_cfg()
         self._max_action_delay_steps = self.cfg.action_delay_steps_max if self.cfg.enable_action_delay else 0
         seed_cfg = getattr(self.cfg, "seed", None)
@@ -214,26 +212,12 @@ class Go2PendulumEnv(DirectRLEnv):
             self._current_difficulty_level = self.cfg.difficulty_override
             self._apply_difficulty_preset(self.cfg.difficulty_override)
 
-        # Derive action and joint-position bounds from soft joint limits.
-        leg_joint_pos_limits = self.robot.data.soft_joint_pos_limits[:, self._leg_dof_ids, :]
         leg_default_joint_pos = self.robot.data.default_joint_pos[:, self._leg_dof_ids]
-        self._joint_pos_low = leg_joint_pos_limits[:, :, 0].clone()
-        self._joint_pos_high = leg_joint_pos_limits[:, :, 1].clone()
-        if self.cfg.enable_per_joint_action_bounds:
-            action_low = (self._joint_pos_low - leg_default_joint_pos) / self.cfg.action_scale
-            action_high = (self._joint_pos_high - leg_default_joint_pos) / self.cfg.action_scale
-            action_center = 0.5 * (action_low + action_high)
-            action_half_range = 0.5 * (action_high - action_low) * self.cfg.action_bound_margin
-            self._action_low = action_center - action_half_range
-            self._action_high = action_center + action_half_range
 
-        # Joint position command (deviation from default joint positions).
+        # Joint position command from delayed policy offsets relative to default joint positions.
         self._actions_raw_policy = torch.zeros(self.num_envs, self._action_dim, device=self.device)
-        self._actions_bounded = torch.zeros_like(self._actions_raw_policy)
         self._actions_delayed = torch.zeros_like(self._actions_raw_policy)
         self._actions_executed = torch.zeros_like(self._actions_raw_policy)
-        self._processed_actions = torch.zeros_like(self._actions_raw_policy)
-        self._previous_actions = torch.zeros_like(self._actions_raw_policy)
         self.desired_joint_pos = leg_default_joint_pos.clone()
         self._action_delay_buffer = torch.zeros(
             self.num_envs,
@@ -825,31 +809,20 @@ class Go2PendulumEnv(DirectRLEnv):
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self._update_external_wrench_pushes()
         self._actions_raw_policy = actions.clone()
-        if self.cfg.enable_per_joint_action_bounds:
-            self._actions_bounded = torch.clamp(self._actions_raw_policy, min=self._action_low, max=self._action_high)
-        else:
-            self._actions_bounded = self._actions_raw_policy.clone()
 
         if self.cfg.enable_action_delay:
             self._action_delay_buffer = torch.roll(self._action_delay_buffer, shifts=1, dims=2)
-            self._action_delay_buffer[:, :, 0] = self._actions_bounded
+            self._action_delay_buffer[:, :, 0] = self._actions_raw_policy
             delay_idx = self._action_delay_steps.clamp(max=self._max_action_delay_steps).view(self.num_envs, 1, 1)
             delay_idx = delay_idx.expand(-1, self._action_dim, 1)
             self._actions_delayed = torch.gather(self._action_delay_buffer, dim=2, index=delay_idx).squeeze(-1)
         else:
-            self._actions_delayed = self._actions_bounded.clone()
+            self._actions_delayed = self._actions_raw_policy.clone()
 
         self._actions_executed = self._actions_delayed.clone()
-
-        self._processed_actions = self.cfg.action_scale * self._actions_executed
-
-        self.desired_joint_pos = (
-            self.robot.data.default_joint_pos[:, self._leg_dof_ids] + self._processed_actions
+        self.desired_joint_pos = self.robot.data.default_joint_pos[:, self._leg_dof_ids] + (
+            self.cfg.action_scale * self._actions_executed
         )
-        if self.cfg.enable_desired_joint_pos_hard_clamp:
-            self.desired_joint_pos = torch.clamp(
-                self.desired_joint_pos, min=self._joint_pos_low, max=self._joint_pos_high
-            )
 
     def _apply_action(self) -> None:
         self.robot.set_joint_position_target(
@@ -890,7 +863,6 @@ class Go2PendulumEnv(DirectRLEnv):
 
     def _get_observations(self) -> dict:
         self._update_curriculum()
-        self._previous_actions = self._actions_raw_policy.clone()
 
         leg_joint_pos_raw = (
             self.robot.data.joint_pos[:, self._leg_dof_ids] - self.robot.data.default_joint_pos[:, self._leg_dof_ids]
@@ -1016,6 +988,7 @@ class Go2PendulumEnv(DirectRLEnv):
         state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
 
         # Apply observation delay to actor proprioceptive block.
+        # Action history uses the actually executed delayed command, not the newest policy output.
         proprio_block = torch.cat(
             [
                 actor_body_lin_vel_b,
@@ -1372,11 +1345,8 @@ class Go2PendulumEnv(DirectRLEnv):
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
 
         self._actions_raw_policy[env_ids] = 0.0
-        self._actions_bounded[env_ids] = 0.0
         self._actions_delayed[env_ids] = 0.0
         self._actions_executed[env_ids] = 0.0
-        self._previous_actions[env_ids] = 0.0
-        self._processed_actions[env_ids] = 0.0
         self._action_delay_buffer[env_ids] = 0.0
         self._steps_since_reset[env_ids] = 0
         if self.cfg.enable_action_delay:

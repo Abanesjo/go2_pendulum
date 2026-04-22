@@ -78,9 +78,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     action_delay_steps_min = 0
     action_delay_steps_max = 1
     action_delay_randomize_per_reset = True
-    enable_per_joint_action_bounds = True
-    action_bound_margin = 1.0
-    enable_desired_joint_pos_hard_clamp = True
     observation_space = 48 + 4 + 4
     state_space = 48 + 4 + 4  # Asymmetric actor-critic: critic obs dimension (set in __post_init__)
     debug_vis = True
