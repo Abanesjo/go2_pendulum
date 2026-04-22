@@ -83,7 +83,7 @@ class Go2PendulumEnv(DirectRLEnv):
             goal_randomization_dist_min=0.2,
             goal_randomization_dist_max=0.5,
             goal_yaw_randomization_min=math.radians(-45),
-            goal_yaw_randomization_max=math.radians(-45),
+            goal_yaw_randomization_max=math.radians(45),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(5.0),
             pendulum_joint_limit_min_rad=math.radians(-90.0),
@@ -258,7 +258,8 @@ class Go2PendulumEnv(DirectRLEnv):
         elif self.cfg.enable_action_delay:
             self._action_delay_steps.fill_(self.cfg.action_delay_steps_max)
 
-        # Target state [x_d, y_d, yaw_d] in environment frame (randomized per reset).
+        # Target state [x_d, y_d, yaw_d] in environment frame.
+        # x/y come from target distance + bearing; yaw is the desired robot heading at the target.
         self.target_state = None
 
         # Marker visualization buffers.
@@ -1436,6 +1437,7 @@ class Go2PendulumEnv(DirectRLEnv):
         yaw_max = max(self.cfg.goal_yaw_randomization_min, self.cfg.goal_yaw_randomization_max)
 
         goal_distance = sample_uniform(dist_min, dist_max, (num_reset_envs,), self.device)
+        # Target position bearing and desired final heading are sampled independently.
         goal_bearing = sample_uniform(bearing_min, bearing_max, (num_reset_envs,), self.device)
         goal_noise_x = goal_distance * torch.cos(goal_bearing)
         goal_noise_y = goal_distance * torch.sin(goal_bearing)

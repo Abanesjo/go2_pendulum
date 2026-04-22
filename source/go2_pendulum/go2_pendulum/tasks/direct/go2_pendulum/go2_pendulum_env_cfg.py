@@ -101,9 +101,12 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     goal_randomization_dist_min = 0.0
     goal_randomization_dist_max = 0.0
 
-    goal_randomization_angle_min = math.radians(0)
-    goal_randomization_angle_max = math.radians(360)
+    # Bearing of the target position in the environment frame.
+    # A full-circle range keeps the target position free to spawn anywhere around the robot.
+    goal_randomization_angle_min = math.radians(-180)
+    goal_randomization_angle_max = math.radians(180)
 
+    # Desired robot heading at the target location.
     goal_yaw_randomization_min = math.radians(0)
     goal_yaw_randomization_max = math.radians(0)
 
