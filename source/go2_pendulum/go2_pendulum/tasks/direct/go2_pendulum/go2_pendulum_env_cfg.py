@@ -3,6 +3,101 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+# -----------------------------------------------------------------------------
+# User Guide: deploying a trained policy from this task
+#
+# This environment exposes a 56-D actor observation and expects a 12-D action.
+# The critic uses the same layout, but with clean ground-truth values instead of
+# noisy/delayed actor measurements.
+#
+# Observation layout (policy and critic):
+#   0:3    body linear velocity in base frame                      [vx, vy, vz]
+#   3:6    body angular velocity in base frame                     [wx, wy, wz]
+#   6:9    projected gravity in base frame                        [gx, gy, gz]
+#   9:12   target-state error in base frame                        [
+#             target_x_error_body,
+#             target_y_error_body,
+#             wrap_to_pi(target_yaw - base_yaw),
+#          ]
+#   12:24  leg joint position offsets from the default pose       [
+#             FL_hip_joint, FL_thigh_joint, FL_calf_joint,
+#             FR_hip_joint, FR_thigh_joint, FR_calf_joint,
+#             RL_hip_joint, RL_thigh_joint, RL_calf_joint,
+#             RR_hip_joint, RR_thigh_joint, RR_calf_joint,
+#          ]
+#   24:36  leg joint velocities                                   [
+#             FL_hip_joint, FL_thigh_joint, FL_calf_joint,
+#             FR_hip_joint, FR_thigh_joint, FR_calf_joint,
+#             RL_hip_joint, RL_thigh_joint, RL_calf_joint,
+#             RR_hip_joint, RR_thigh_joint, RR_calf_joint,
+#          ]
+#   36:38  pendulum joint positions                                [
+#             pendulum_joint1, pendulum_joint2,
+#          ]
+#   38:40  pendulum joint velocities                               [
+#             pendulum_joint1, pendulum_joint2,
+#          ]
+#   40:52  latest executed action command                          [
+#             FL_hip_joint, FL_thigh_joint, FL_calf_joint,
+#             FR_hip_joint, FR_thigh_joint, FR_calf_joint,
+#             RL_hip_joint, RL_thigh_joint, RL_calf_joint,
+#             RR_hip_joint, RR_thigh_joint, RR_calf_joint,
+#          ]
+#   52:56  gait clock inputs                                       [
+#             sin(phase_FL), sin(phase_FR), sin(phase_RL), sin(phase_RR),
+#          ]
+#
+# Notes:
+#   - The actor observation is the one used by the policy at inference time.
+#   - The actor observation includes the same kinds of effects used in training:
+#     sensor bias/drift, observation noise, and optional proprioceptive delay.
+#   - The "last action" term is the latest executed delayed command, not the
+#     newest raw model output.
+#
+# Action layout:
+#   The policy outputs 12 floating-point values ordered as
+#     [
+#       FL_hip_joint, FL_thigh_joint, FL_calf_joint,
+#       FR_hip_joint, FR_thigh_joint, FR_calf_joint,
+#       RL_hip_joint, RL_thigh_joint, RL_calf_joint,
+#       RR_hip_joint, RR_thigh_joint, RR_calf_joint,
+#     ]
+#
+# Action semantics:
+#   - These 12 values are joint-position offsets, not absolute joint targets.
+#   - The only post-policy processing kept in the environment is optional action
+#     delay. There is no downstream filtering or clamping in the task anymore.
+#   - After delay, the executed command is converted to desired joint positions:
+#
+#       q_des = q_default + action_scale * action_executed
+#
+#     with
+#       action_scale = 0.25  # radians per unit action
+#
+#   - The current default joint-position offsets used by this task are
+#       [
+#          0.1,  0.8, -1.5,   # FL_hip_joint, FL_thigh_joint, FL_calf_joint
+#         -0.1,  0.8, -1.5,   # FR_hip_joint, FR_thigh_joint, FR_calf_joint
+#          0.1,  1.0, -1.5,   # RL_hip_joint, RL_thigh_joint, RL_calf_joint
+#         -0.1,  1.0, -1.5,   # RR_hip_joint, RR_thigh_joint, RR_calf_joint
+#       ]
+#
+#   Example:
+#     if the policy outputs a_FL_thigh = 0.4, then the desired FL thigh target
+#     sent to the low-level joint position controller is
+#
+#       q_des_FL_thigh = 0.8 + 0.25 * 0.4 = 0.9 rad
+#
+# Inference recipe:
+#   1. Build the 56-D observation in the exact order above.
+#   2. Run the policy to obtain the 12-D joint-offset action.
+#   3. Apply the same action delay model used in deployment.
+#   4. Convert the delayed action to desired joint positions with the formula
+#      above.
+#   5. Send those desired joint positions to the robot's joint position
+#      controller in the same joint order.
+# -----------------------------------------------------------------------------
+
 import math
 import os
 
