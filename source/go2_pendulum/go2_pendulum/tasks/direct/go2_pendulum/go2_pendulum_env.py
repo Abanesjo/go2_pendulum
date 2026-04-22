@@ -25,9 +25,9 @@ from .go2_pendulum_env_cfg import Go2PendulumEnvCfg
 class Go2PendulumEnv(DirectRLEnv):
     cfg: Go2PendulumEnvCfg
 
-    # Difficulty presets: values for each level, applied by the curriculum at runtime.
+    # Difficulty presets: values for each curriculum level, applied at runtime.
     _DIFFICULTY_PRESETS = {
-        # Stand and balance only. No goals, tiny spawn perturbation, light DR.
+        # Stand and balance only. No goals, tiny spawn perturbation, no pushes.
         1: dict(
             goal_randomization_dist_min=0.0,
             goal_randomization_dist_max=0.0,
@@ -42,14 +42,7 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_angle_rad=math.radians(60.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=5.0,
-            enable_domain_randomization=True,
-            mass_scale_range=(0.95, 1.1),
-            com_offset_x_range=(-0.01, 0.01),
-            com_offset_y_range=(-0.01, 0.01),
-            com_offset_z_range=(-0.005, 0.015),
             enable_external_wrench_push=False,
-            motor_stiffness_scale_range=(0.9, 1.1),
-            motor_damping_scale_range=(0.9, 1.1),
         ),
         # Learn to take small steps. Small goals, slightly larger spawn angle. No pushes.
         2: dict(
@@ -66,16 +59,9 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_angle_rad=math.radians(60.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=0.5,
-            enable_domain_randomization=True,
-            mass_scale_range=(0.92, 1.2),
-            com_offset_x_range=(-0.015, 0.015),
-            com_offset_y_range=(-0.015, 0.015),
-            com_offset_z_range=(-0.01, 0.02),
             enable_external_wrench_push=False,
-            motor_stiffness_scale_range=(0.85, 1.15),
-            motor_damping_scale_range=(0.85, 1.15),
         ),
-        # Walk further, turn more, larger pendulum perturbation. Still no pushes.
+        # Walk further, turn more, and accept larger pendulum errors. Still no pushes.
         3: dict(
             goal_randomization_dist_min=0.1,
             goal_randomization_dist_max=0.3,
@@ -90,16 +76,9 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_angle_rad=math.radians(45.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=0.3,
-            enable_domain_randomization=True,
-            mass_scale_range=(0.9, 1.35),
-            com_offset_x_range=(-0.02, 0.02),
-            com_offset_y_range=(-0.02, 0.02),
-            com_offset_z_range=(-0.015, 0.03),
             enable_external_wrench_push=False,
-            motor_stiffness_scale_range=(0.8, 1.2),
-            motor_damping_scale_range=(0.8, 1.2),
         ),
-        # Full goal range, full spawn angle. Introduce gentle pushes. Tighter termination.
+        # Full goal range and full spawn angle. Introduce gentle pushes. Tighter termination.
         4: dict(
             goal_randomization_dist_min=0.2,
             goal_randomization_dist_max=0.5,
@@ -114,18 +93,11 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_angle_rad=math.radians(30.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=0.2,
-            enable_domain_randomization=True,
-            mass_scale_range=(0.9, 1.5),
-            com_offset_x_range=(-0.03, 0.03),
-            com_offset_y_range=(-0.03, 0.03),
-            com_offset_z_range=(-0.02, 0.04),
             enable_external_wrench_push=True,
             push_force_x_range=(-5.0, 5.0),
             push_force_y_range=(-5.0, 5.0),
-            motor_stiffness_scale_range=(0.8, 1.2),
-            motor_damping_scale_range=(0.8, 1.2),
         ),
-        # Full difficulty. Stronger pushes, max DR, tightest termination.
+        # Full difficulty. Stronger pushes and tightest termination.
         5: dict(
             goal_randomization_dist_min=0.3,
             goal_randomization_dist_max=0.5,
@@ -140,16 +112,9 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_angle_rad=math.radians(15.0),
             pendulum_terminate_duration_s=5.0,
             position_tolerance=0.2,
-            enable_domain_randomization=True,
-            mass_scale_range=(0.9, 1.55),
-            com_offset_x_range=(-0.03, 0.03),
-            com_offset_y_range=(-0.03, 0.03),
-            com_offset_z_range=(-0.02, 0.05),
             enable_external_wrench_push=True,
             push_force_x_range=(-10.0, 10.0),
             push_force_y_range=(-10.0, 10.0),
-            motor_stiffness_scale_range=(0.8, 1.2),
-            motor_damping_scale_range=(0.8, 1.2),
         ),
     }
 
@@ -892,18 +857,12 @@ class Go2PendulumEnv(DirectRLEnv):
         )
 
     def _update_curriculum(self) -> None:
-        """Update noise scale and difficulty level based on training progress."""
+        """Update difficulty level based on training progress."""
         if not self.cfg.enable_curriculum or self.cfg.curriculum_total_steps <= 0:
             return
         progress = min(1.0, max(0.0, self.common_step_counter / self.cfg.curriculum_total_steps))
 
-        # Noise curriculum: linearly ramp observation_noise_scale.
-        self.cfg.observation_noise_scale = (
-            self.cfg.noise_curriculum_start_scale
-            + progress * (self.cfg.noise_curriculum_end_scale - self.cfg.noise_curriculum_start_scale)
-        )
-
-        # Difficulty curriculum: evenly split into 4 levels.
+        # Difficulty curriculum: evenly split into 5 levels.
         if progress < 1 / 5:
             new_level = 1
         elif progress < 2 / 5:
@@ -1001,14 +960,13 @@ class Go2PendulumEnv(DirectRLEnv):
                 actor_pendulum_joint_pos = actor_pendulum_joint_pos + self._bias_pendulum_joint_pos
                 actor_pendulum_joint_vel = actor_pendulum_joint_vel + self._bias_pendulum_joint_vel
 
-        # Apply observation noise (scaled by curriculum-driven observation_noise_scale).
-        obs_noise_scale = self.cfg.observation_noise_scale
-        body_lin_vel_noise = self.cfg.body_lin_vel_noise * obs_noise_scale
-        body_ang_vel_noise = self.cfg.body_ang_vel_noise * obs_noise_scale
-        position_noise = self.cfg.position_noise * obs_noise_scale
-        orientation_noise = self.cfg.orientation_noise * obs_noise_scale
-        pendulum_joint_pos_noise = self.cfg.pendulum_joint_pos_noise * obs_noise_scale
-        pendulum_joint_vel_noise = self.cfg.pendulum_joint_vel_noise * obs_noise_scale
+        # Apply fixed-magnitude observation noise.
+        body_lin_vel_noise = self.cfg.body_lin_vel_noise
+        body_ang_vel_noise = self.cfg.body_ang_vel_noise
+        position_noise = self.cfg.position_noise
+        orientation_noise = self.cfg.orientation_noise
+        pendulum_joint_pos_noise = self.cfg.pendulum_joint_pos_noise
+        pendulum_joint_vel_noise = self.cfg.pendulum_joint_vel_noise
 
         if body_lin_vel_noise > 0.0:
             actor_body_lin_vel_b = actor_body_lin_vel_b + sample_uniform(
@@ -1213,9 +1171,9 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_angle_deg = torch.rad2deg(torch.linalg.norm(pendulum_joint_pos, dim=1))
             pendulum_speed_deg_s = torch.rad2deg(pendulum_vel_norm)
 
-            # Match omniwheel: reward high when pendulum is balanced and/or base speed is low.
+            # Reward moving while balanced: speed only helps when the pendulum stays upright.
             base_speed = torch.linalg.norm(self.robot.data.root_lin_vel_w[:, :2], dim=1)
-            balanced_movement_reward = torch.exp(-pendulum_upright_error * base_speed)
+            balanced_movement_reward = torch.exp(-pendulum_upright_error) * base_speed
         else:
             pendulum_upright_reward = torch.zeros(self.num_envs, device=self.device)
             pendulum_velocity_reward = torch.zeros(self.num_envs, device=self.device)

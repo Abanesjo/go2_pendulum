@@ -86,18 +86,16 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     debug_vis = True
     use_pendulum = True
 
-    # --- Curriculum (noise ramp + difficulty progression) ---
-    # Curriculum completes over 40000 iterations (40000 * 32 = 480000 steps).
+    # --- Curriculum (difficulty progression only) ---
+    # Curriculum completes over 75000 * 32 environment steps.
     # Beyond that, training continues at the highest difficulty level.
     enable_curriculum = True
     curriculum_total_steps = 75000 * 32
-    noise_curriculum_start_scale = 0.0
-    noise_curriculum_end_scale = 1.0
-    difficulty_override: int = -1  # -1 = use curriculum, 1-4 = force that difficulty level
+    difficulty_override: int = -1  # -1 = use curriculum, 1-5 = force that difficulty level
 
     # --- Difficulty-dependent defaults (level 1 initial values) ---
     # These are updated at runtime by the difficulty curriculum.
-    # See _DIFFICULTY_PRESETS in go2_pendulum_env.py for all four levels.
+    # See _DIFFICULTY_PRESETS in go2_pendulum_env.py for all five levels.
 
     # Initial conditions (reset sampling).
     goal_randomization_dist_min = 0.0
@@ -131,16 +129,15 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     position_terminate_duration_s = 15.0
     termination_penalty = -5.0
 
-    # --- Observation noise (applied to actor obs only, scaled by observation_noise_scale) ---
+    # --- Observation noise (applied to actor obs only at fixed max magnitude) ---
     # TODO(human): Tune these noise magnitudes based on real sensor characteristics.
-    # These define the max noise at observation_noise_scale=1.0 (uniform ±value).
-    observation_noise_scale = 0.0
+    # All values are uniform +/- noise in native units.
     body_lin_vel_noise = 0.1
     body_ang_vel_noise = 0.2
     orientation_noise = 0.05
     position_noise = 0.01
-    pendulum_joint_pos_noise = 0.02
-    pendulum_joint_vel_noise = 1.0
+    pendulum_joint_pos_noise = math.radians(0.06)
+    pendulum_joint_vel_noise = math.radians(3.0)
 
     # Position tracking and heading alignment.
     position_reward_scale = 0.4
@@ -225,7 +222,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     imu_gravity_drift_std_per_s = 0.0
     encoder_joint_pos_bias_range = math.radians(1.0)
     encoder_joint_vel_bias_range = math.radians(5.0)
-    encoder_pendulum_pos_bias_range = math.radians(2.5)
+    encoder_pendulum_pos_bias_range = math.radians(1.0)
     encoder_pendulum_vel_bias_range = math.radians(3.0)
     encoder_joint_pos_drift_std_per_s = math.radians(0.0)
     encoder_joint_vel_drift_std_per_s = math.radians(0.0)

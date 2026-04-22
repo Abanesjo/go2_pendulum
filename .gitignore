@@ -76,3 +76,4 @@ tests/
 CLAUDE.md
 
 .vscode/
+/**/.codex
