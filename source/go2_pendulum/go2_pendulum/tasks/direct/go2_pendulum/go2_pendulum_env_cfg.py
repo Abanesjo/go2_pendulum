@@ -201,7 +201,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Beyond that, training continues at the highest difficulty level.
     enable_curriculum = True
     curriculum_total_steps = 25000 * 32
-    difficulty_override: int = -1  # -1 = use curriculum, 1-5 = force that difficulty level
+    difficulty_override: int = 5  # -1 = use curriculum, 1-5 = force that difficulty level
 
     # --- Difficulty-dependent defaults (level 1 initial values) ---
     # These are updated at runtime by the difficulty curriculum.
@@ -290,22 +290,12 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     enable_domain_randomization = True
     dr_seed_offset = 0
 
-    # Material randomization.
-    enable_material_randomization = True
-    material_randomize_on_reset = True
-    material_randomization_prob = 1.0
-    material_num_buckets = 64
-    material_static_friction_range = (0.5, 1.25)
-    material_dynamic_friction_range = (0.4, 1.1)
-    material_restitution_range = (0.0, 0.05)
-    material_make_consistent = True
-
     # Base mass / COM randomization.
     enable_mass_randomization = True
     mass_randomize_body_name = "base"
-    mass_scale_range = (0.9, 1.55)
+    mass_scale_range = (0.9, 1.2)
     mass_recompute_inertia = True
-    enable_com_randomization = True
+    enable_com_randomization = False
     com_offset_x_range = (-0.03, 0.03)
     com_offset_y_range = (-0.03, 0.03)
     com_offset_z_range = (-0.02, 0.05)
@@ -313,17 +303,17 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Motor gain randomization.
     enable_motor_gain_randomization = True
     motor_gain_actuator_name = "base_legs"
-    motor_stiffness_scale_range = (0.8, 1.2)
-    motor_damping_scale_range = (0.8, 1.2)
-    motor_gain_per_joint = True
+    motor_stiffness_scale_range = (0.9, 1.1)
+    motor_damping_scale_range = (0.9, 1.1)
+    motor_gain_per_joint = False
 
     # Sensor bias and drift randomization.
     enable_sensor_bias_drift = True
     imu_lin_vel_bias_range = 0.05
     imu_ang_vel_bias_range = math.radians(3.0)
     imu_gravity_bias_range = 0.03
-    imu_lin_vel_drift_std_per_s = 0.01
-    imu_ang_vel_drift_std_per_s = math.radians(0.5)
+    imu_lin_vel_drift_std_per_s = 0.0
+    imu_ang_vel_drift_std_per_s = math.radians(0.0)
     imu_gravity_drift_std_per_s = 0.0
     encoder_joint_pos_bias_range = math.radians(1.0)
     encoder_joint_vel_bias_range = math.radians(5.0)
@@ -331,8 +321,8 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     encoder_pendulum_vel_bias_range = math.radians(3.0)
     encoder_joint_pos_drift_std_per_s = math.radians(0.0)
     encoder_joint_vel_drift_std_per_s = math.radians(0.0)
-    encoder_pendulum_pos_drift_std_per_s = math.radians(0.03)
-    encoder_pendulum_vel_drift_std_per_s = math.radians(0.1)
+    encoder_pendulum_pos_drift_std_per_s = math.radians(0.0)
+    encoder_pendulum_vel_drift_std_per_s = math.radians(0.0)
 
     # External wrench pushes.
     enable_external_wrench_push = False

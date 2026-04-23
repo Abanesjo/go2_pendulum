@@ -344,15 +344,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self.target_visualizer = VisualizationMarkers(self.cfg.target_marker_cfg)
 
     def _validate_domain_randomization_cfg(self) -> None:
-        if not 0.0 <= self.cfg.material_randomization_prob <= 1.0:
-            raise ValueError(
-                f"material_randomization_prob must be in [0, 1]. Got {self.cfg.material_randomization_prob}."
-            )
-        if self.cfg.material_num_buckets <= 0:
-            raise ValueError(f"material_num_buckets must be > 0. Got {self.cfg.material_num_buckets}.")
-        self._validate_range("material_static_friction_range", self.cfg.material_static_friction_range)
-        self._validate_range("material_dynamic_friction_range", self.cfg.material_dynamic_friction_range)
-        self._validate_range("material_restitution_range", self.cfg.material_restitution_range)
         self._validate_range("mass_scale_range", self.cfg.mass_scale_range)
         if self.cfg.mass_scale_range[0] <= 0.0:
             raise ValueError(f"mass_scale_range min must be > 0. Got {self.cfg.mass_scale_range[0]}.")
@@ -397,22 +388,6 @@ class Go2PendulumEnv(DirectRLEnv):
 
     def _init_domain_randomization_state(self) -> None:
         self._dr_all_env_ids = torch.arange(self.num_envs, device=self.device, dtype=torch.long)
-
-        # Material randomization state.
-        self._material_buckets = None
-        if self.cfg.enable_domain_randomization and self.cfg.enable_material_randomization:
-            static_samples = self._sample_uniform_cpu(
-                self.cfg.material_static_friction_range, (self.cfg.material_num_buckets,)
-            )
-            dynamic_samples = self._sample_uniform_cpu(
-                self.cfg.material_dynamic_friction_range, (self.cfg.material_num_buckets,)
-            )
-            restitution_samples = self._sample_uniform_cpu(
-                self.cfg.material_restitution_range, (self.cfg.material_num_buckets,)
-            )
-            if self.cfg.material_make_consistent:
-                dynamic_samples = torch.minimum(dynamic_samples, static_samples)
-            self._material_buckets = torch.stack((static_samples, dynamic_samples, restitution_samples), dim=-1)
 
         # Mass / COM randomization state.
         self._mass_body_ids_cpu = torch.tensor([], dtype=torch.long, device="cpu")
@@ -467,32 +442,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self._push_next_step = torch.zeros((self.num_envs,), device=self.device, dtype=torch.long)
         self._push_end_step = torch.zeros((self.num_envs,), device=self.device, dtype=torch.long)
         self._schedule_next_push(self._dr_all_env_ids, torch.zeros(self.num_envs, device=self.device, dtype=torch.long))
-
-    def _randomize_materials(self, env_ids: torch.Tensor) -> None:
-        if not (self.cfg.enable_domain_randomization and self.cfg.enable_material_randomization):
-            return
-        if not self.cfg.material_randomize_on_reset or self._material_buckets is None:
-            return
-        env_ids_cpu = env_ids.to(device="cpu", dtype=torch.long)
-        if env_ids_cpu.numel() == 0:
-            return
-        if self.cfg.material_randomization_prob < 1.0:
-            mask = torch.rand((env_ids_cpu.numel(),), generator=self._dr_rng, device="cpu") < self.cfg.material_randomization_prob
-            env_ids_cpu = env_ids_cpu[mask]
-            if env_ids_cpu.numel() == 0:
-                return
-        total_num_shapes = self.robot.root_physx_view.max_shapes
-        bucket_ids = torch.randint(
-            0,
-            self.cfg.material_num_buckets,
-            (env_ids_cpu.numel(), total_num_shapes),
-            generator=self._dr_rng,
-            device="cpu",
-        )
-        material_samples = self._material_buckets[bucket_ids]
-        materials = self.robot.root_physx_view.get_material_properties()
-        materials[env_ids_cpu] = material_samples
-        self.robot.root_physx_view.set_material_properties(materials, env_ids_cpu)
 
     def _randomize_mass_and_com(self, env_ids: torch.Tensor) -> None:
         if not self.cfg.enable_domain_randomization:
@@ -1215,7 +1164,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self._steps_since_reset[env_ids] = 0
 
         if self.cfg.enable_domain_randomization:
-            self._randomize_materials(env_ids)
             self._randomize_mass_and_com(env_ids)
             self._randomize_motor_gains(env_ids)
             self._sample_sensor_biases(env_ids)
