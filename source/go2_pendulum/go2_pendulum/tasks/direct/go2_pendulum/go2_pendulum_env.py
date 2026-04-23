@@ -36,7 +36,8 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_angle_max=math.radians(0.0),
             pendulum_joint_limit_min_rad=math.radians(-20.0),
             pendulum_joint_limit_max_rad=math.radians(20.0),
-            termination_grace_s=3.0,
+            termination_grace_s=0.1,
+            pendulum_termination_grace_s=3.0,
             base_height_terminate_duration_s=10.0,
             pendulum_terminate_angle_rad=math.radians(19.0),
             pendulum_terminate_duration_s=0.5,
@@ -53,7 +54,8 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_angle_max=math.radians(5.0),
             pendulum_joint_limit_min_rad=math.radians(-20.0),
             pendulum_joint_limit_max_rad=math.radians(20.0),
-            termination_grace_s=3.0,
+            termination_grace_s=0.1,
+            pendulum_termination_grace_s=3.0,
             base_height_terminate_duration_s=10.0,
             pendulum_terminate_angle_rad=math.radians(19.0),
             pendulum_terminate_duration_s=0.5,
@@ -70,7 +72,8 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_angle_max=math.radians(10.0),
             pendulum_joint_limit_min_rad=math.radians(-20.0),
             pendulum_joint_limit_max_rad=math.radians(20.0),
-            termination_grace_s=3.0,
+            termination_grace_s=0.1,
+            pendulum_termination_grace_s=3.0,
             base_height_terminate_duration_s=10.0,
             pendulum_terminate_angle_rad=math.radians(19.0),
             pendulum_terminate_duration_s=0.5,
@@ -87,7 +90,8 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_angle_max=math.radians(15.0),
             pendulum_joint_limit_min_rad=math.radians(-20.0),
             pendulum_joint_limit_max_rad=math.radians(20.0),
-            termination_grace_s=3.0,
+            termination_grace_s=0.1,
+            pendulum_termination_grace_s=3.0,
             base_height_terminate_duration_s=10.0,
             pendulum_terminate_angle_rad=math.radians(19.0),
             pendulum_terminate_duration_s=0.5,
@@ -106,7 +110,8 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_angle_max=math.radians(19.5),
             pendulum_joint_limit_min_rad=math.radians(-20.0),
             pendulum_joint_limit_max_rad=math.radians(20.0),
-            termination_grace_s=3.0,
+            termination_grace_s=0.1,
+            pendulum_termination_grace_s=3.0,
             base_height_terminate_duration_s=10.0,
             pendulum_terminate_angle_rad=math.radians(19.0),
             pendulum_terminate_duration_s=0.5,
@@ -1102,8 +1107,11 @@ class Go2PendulumEnv(DirectRLEnv):
 
         base_contact_grace_steps = max(0, math.ceil(self.cfg.base_contact_grace_s / self.step_dt))
         termination_grace_steps = max(0, math.ceil(self.cfg.termination_grace_s / self.step_dt))
+        pendulum_termination_grace_steps = max(0, math.ceil(self.cfg.pendulum_termination_grace_s / self.step_dt))
         in_termination_grace = steps_since_reset < termination_grace_steps
+        in_pendulum_termination_grace = steps_since_reset < pendulum_termination_grace_steps
         termination_allowed = ~in_termination_grace
+        pendulum_termination_allowed = ~in_pendulum_termination_grace
 
         net_contact_forces = self._contact_sensor.data.net_forces_w_history
         cstr_termination_contacts = torch.any(
@@ -1141,7 +1149,6 @@ class Go2PendulumEnv(DirectRLEnv):
                 torch.norm(pendulum_contact_forces, dim=-1) > self.cfg.pendulum_contact_force_threshold,
                 dim=1,
             )
-            pendulum_contact = pendulum_contact & termination_allowed
             terminated = terminated | pendulum_contact
 
         pendulum_angle_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
@@ -1152,7 +1159,9 @@ class Go2PendulumEnv(DirectRLEnv):
                 self._pendulum_angle_failure_steps = torch.zeros(
                     self.num_envs, device=self.device, dtype=torch.long
                 )
-            pendulum_failing = (pendulum_angle_norm > self.cfg.pendulum_terminate_angle_rad) & termination_allowed
+            pendulum_failing = (
+                (pendulum_angle_norm > self.cfg.pendulum_terminate_angle_rad) & pendulum_termination_allowed
+            )
             self._pendulum_angle_failure_steps = torch.where(
                 pendulum_failing,
                 self._pendulum_angle_failure_steps + 1,
