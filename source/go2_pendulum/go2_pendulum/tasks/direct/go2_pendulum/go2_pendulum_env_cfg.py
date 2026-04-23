@@ -195,7 +195,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     leg_joint_names = GO2_LEG_JOINT_NAMES
     action_space = len(leg_joint_names)
     action_scale = 0.25
-    enable_action_delay = True
+    enable_action_delay = False
     action_delay_steps_min = 0
     action_delay_steps_max = 1
     action_delay_randomize_per_reset = True
