@@ -16,7 +16,6 @@ from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.sensors import ContactSensor
-from isaaclab.utils import DelayBuffer
 from isaaclab.utils.math import sample_uniform
 
 from .go2_pendulum_env_cfg import Go2PendulumEnvCfg
@@ -173,15 +172,7 @@ class Go2PendulumEnv(DirectRLEnv):
         self._action_dim = gym.spaces.flatdim(self.single_action_space)
         if self.cfg.action_scale <= 0.0:
             raise ValueError(f"action_scale must be > 0. Got {self.cfg.action_scale}.")
-        if self.cfg.action_delay_steps_min < 0:
-            raise ValueError(f"action_delay_steps_min must be >= 0. Got {self.cfg.action_delay_steps_min}.")
-        if self.cfg.action_delay_steps_max < self.cfg.action_delay_steps_min:
-            raise ValueError(
-                "action_delay_steps_max must be >= action_delay_steps_min. "
-                f"Got {self.cfg.action_delay_steps_max} < {self.cfg.action_delay_steps_min}."
-            )
         self._validate_domain_randomization_cfg()
-        self._max_action_delay_steps = self.cfg.action_delay_steps_max if self.cfg.enable_action_delay else 0
         seed_cfg = getattr(self.cfg, "seed", None)
         seed = 0 if seed_cfg is None else int(seed_cfg)
         self._dr_rng = torch.Generator(device="cpu")
@@ -216,33 +207,9 @@ class Go2PendulumEnv(DirectRLEnv):
 
         leg_default_joint_pos = self.robot.data.default_joint_pos[:, self._leg_dof_ids]
 
-        # Joint position command from delayed policy offsets relative to default joint positions.
-        self._actions_raw_policy = torch.zeros(self.num_envs, self._action_dim, device=self.device)
-        self._actions_delayed = torch.zeros_like(self._actions_raw_policy)
-        self._actions_executed = torch.zeros_like(self._actions_raw_policy)
+        # Joint position command from the latest policy action offsets relative to default joint positions.
+        self.last_action = torch.zeros(self.num_envs, self._action_dim, device=self.device)
         self.desired_joint_pos = leg_default_joint_pos.clone()
-        self._action_delay_buffer = torch.zeros(
-            self.num_envs,
-            self._action_dim,
-            self._max_action_delay_steps + 1,
-            device=self.device,
-        )
-        self._action_delay_steps = torch.full(
-            (self.num_envs,),
-            self.cfg.action_delay_steps_min,
-            device=self.device,
-            dtype=torch.long,
-        )
-        if self.cfg.enable_action_delay and self.cfg.action_delay_randomize_per_reset:
-            self._action_delay_steps = torch.randint(
-                self.cfg.action_delay_steps_min,
-                self.cfg.action_delay_steps_max + 1,
-                (self.num_envs,),
-                device=self.device,
-                dtype=torch.long,
-            )
-        elif self.cfg.enable_action_delay:
-            self._action_delay_steps.fill_(self.cfg.action_delay_steps_max)
 
         # Target state [x_d, y_d, yaw_d] in environment frame.
         # x/y come from target distance + bearing; yaw is the desired robot heading at the target.
@@ -290,7 +257,7 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_pendulum_speed_deg_s_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._prev_position_error = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
 
-        self.last_actions = torch.zeros(
+        self._action_history = torch.zeros(
             self.num_envs,
             self._action_dim,
             3,
@@ -372,19 +339,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self.target_visualizer = VisualizationMarkers(self.cfg.target_marker_cfg)
 
     def _validate_domain_randomization_cfg(self) -> None:
-        if self.cfg.obs_delay_steps_min < 0:
-            raise ValueError(f"obs_delay_steps_min must be >= 0. Got {self.cfg.obs_delay_steps_min}.")
-        if self.cfg.obs_delay_steps_max < self.cfg.obs_delay_steps_min:
-            raise ValueError(
-                "obs_delay_steps_max must be >= obs_delay_steps_min. "
-                f"Got {self.cfg.obs_delay_steps_max} < {self.cfg.obs_delay_steps_min}."
-            )
-        if self.cfg.obs_delay_jitter_extra_max < 0:
-            raise ValueError(f"obs_delay_jitter_extra_max must be >= 0. Got {self.cfg.obs_delay_jitter_extra_max}.")
-        if not self.cfg.obs_delay_proprio_only:
-            raise ValueError("Only proprioceptive observation delay is supported for this environment.")
-        if not 0.0 <= self.cfg.obs_delay_jitter_prob <= 1.0:
-            raise ValueError(f"obs_delay_jitter_prob must be in [0, 1]. Got {self.cfg.obs_delay_jitter_prob}.")
         if not 0.0 <= self.cfg.material_randomization_prob <= 1.0:
             raise ValueError(
                 f"material_randomization_prob must be in [0, 1]. Got {self.cfg.material_randomization_prob}."
@@ -483,44 +437,6 @@ class Go2PendulumEnv(DirectRLEnv):
             self._motor_default_stiffness = self._motor_actuator.stiffness.clone()
             self._motor_default_damping = self._motor_actuator.damping.clone()
             self._motor_num_joints = self._motor_default_stiffness.shape[1]
-
-        # Observation delay state.
-        self._max_obs_delay_steps = (
-            self.cfg.obs_delay_steps_max + self.cfg.obs_delay_jitter_extra_max
-            if self.cfg.enable_domain_randomization and self.cfg.enable_obs_delay
-            else 0
-        )
-        # body_lin_vel(3) + body_ang_vel(3) + projected_gravity(3) + leg_pos(12) + leg_vel(12)
-        # + pendulum_pos(P) + pendulum_vel(P) + actions(12)
-        self._proprio_obs_dim = (
-            3
-            + 3
-            + 3
-            + self._action_dim
-            + self._action_dim
-            + self._pendulum_dof_count
-            + self._pendulum_dof_count
-            + self._action_dim
-        )
-        self._obs_delay_buffer = DelayBuffer(self._max_obs_delay_steps, self.num_envs, self.device)
-        self._obs_delay_steps = torch.full(
-            (self.num_envs,),
-            self.cfg.obs_delay_steps_min,
-            device=self.device,
-            dtype=torch.long,
-        )
-        if self.cfg.enable_domain_randomization and self.cfg.enable_obs_delay:
-            if self.cfg.obs_delay_randomize_per_reset:
-                self._obs_delay_steps = torch.randint(
-                    self.cfg.obs_delay_steps_min,
-                    self.cfg.obs_delay_steps_max + 1,
-                    (self.num_envs,),
-                    device=self.device,
-                    dtype=torch.long,
-                )
-            else:
-                self._obs_delay_steps.fill_(self.cfg.obs_delay_steps_max)
-            self._obs_delay_buffer.set_time_lag(self._obs_delay_steps)
 
         # Sensor bias / drift state.
         self._bias_body_lin_vel = torch.zeros((self.num_envs, 3), device=self.device)
@@ -717,24 +633,6 @@ class Go2PendulumEnv(DirectRLEnv):
                 self.cfg.encoder_pendulum_vel_bias_range,
             )
 
-    def _apply_obs_delay_and_jitter(self, proprio_obs: torch.Tensor) -> torch.Tensor:
-        if not (self.cfg.enable_domain_randomization and self.cfg.enable_obs_delay):
-            return proprio_obs
-        effective_delay = self._obs_delay_steps.clone()
-        if self.cfg.obs_delay_jitter_extra_max > 0 and self.cfg.obs_delay_jitter_prob > 0.0:
-            jitter_mask = torch.rand((self.num_envs,), device=self.device) < self.cfg.obs_delay_jitter_prob
-            jitter_extra = torch.randint(
-                0,
-                self.cfg.obs_delay_jitter_extra_max + 1,
-                (self.num_envs,),
-                device=self.device,
-                dtype=torch.long,
-            )
-            effective_delay = effective_delay + jitter_mask.long() * jitter_extra
-        effective_delay = torch.clamp(effective_delay, 0, self._max_obs_delay_steps)
-        self._obs_delay_buffer.set_time_lag(effective_delay)
-        return self._obs_delay_buffer.compute(proprio_obs)
-
     def _schedule_next_push(self, env_ids: torch.Tensor, now_step: torch.Tensor) -> None:
         if not (self.cfg.enable_domain_randomization and self.cfg.enable_external_wrench_push):
             return
@@ -810,20 +708,9 @@ class Go2PendulumEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self._update_external_wrench_pushes()
-        self._actions_raw_policy = actions.clone()
-
-        if self.cfg.enable_action_delay:
-            self._action_delay_buffer = torch.roll(self._action_delay_buffer, shifts=1, dims=2)
-            self._action_delay_buffer[:, :, 0] = self._actions_raw_policy
-            delay_idx = self._action_delay_steps.clamp(max=self._max_action_delay_steps).view(self.num_envs, 1, 1)
-            delay_idx = delay_idx.expand(-1, self._action_dim, 1)
-            self._actions_delayed = torch.gather(self._action_delay_buffer, dim=2, index=delay_idx).squeeze(-1)
-        else:
-            self._actions_delayed = self._actions_raw_policy.clone()
-
-        self._actions_executed = self._actions_delayed.clone()
+        self.last_action = actions.clone()
         self.desired_joint_pos = self.robot.data.default_joint_pos[:, self._leg_dof_ids] + (
-            self.cfg.action_scale * self._actions_executed
+            self.cfg.action_scale * self.last_action
         )
 
     def _apply_action(self) -> None:
@@ -989,50 +876,18 @@ class Go2PendulumEnv(DirectRLEnv):
 
         state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
 
-        # Apply observation delay to actor proprioceptive block.
-        # Action history uses the actually executed delayed command, not the newest policy output.
-        proprio_block = torch.cat(
+        # Policy obs (actor — potentially noisy).
+        policy_obs = torch.cat(
             [
                 actor_body_lin_vel_b,
                 actor_body_ang_vel_b,
                 actor_projected_gravity_b,
+                state_error,
                 actor_leg_joint_pos,
                 actor_leg_joint_vel,
                 actor_pendulum_joint_pos,
                 actor_pendulum_joint_vel,
-                self._actions_executed,
-            ],
-            dim=-1,
-        )
-        proprio_block = self._apply_obs_delay_and_jitter(proprio_block)
-        idx0 = 3
-        idx1 = idx0 + 3
-        idx2 = idx1 + 3
-        idx3 = idx2 + self._action_dim
-        idx4 = idx3 + self._action_dim
-        idx5 = idx4 + self._pendulum_dof_count
-        idx6 = idx5 + self._pendulum_dof_count
-        delayed_body_lin_vel = proprio_block[:, :idx0]
-        delayed_body_ang_vel = proprio_block[:, idx0:idx1]
-        delayed_projected_gravity = proprio_block[:, idx1:idx2]
-        delayed_leg_joint_pos = proprio_block[:, idx2:idx3]
-        delayed_leg_joint_vel = proprio_block[:, idx3:idx4]
-        delayed_pendulum_joint_pos = proprio_block[:, idx4:idx5]
-        delayed_pendulum_joint_vel = proprio_block[:, idx5:idx6]
-        delayed_actions = proprio_block[:, idx6:]
-
-        # Policy obs (actor — potentially noisy/delayed).
-        policy_obs = torch.cat(
-            [
-                delayed_body_lin_vel,
-                delayed_body_ang_vel,
-                delayed_projected_gravity,
-                state_error,
-                delayed_leg_joint_pos,
-                delayed_leg_joint_vel,
-                delayed_pendulum_joint_pos,
-                delayed_pendulum_joint_vel,
-                delayed_actions,
+                self.last_action,
                 self.clock_inputs,
             ],
             dim=-1,
@@ -1049,7 +904,7 @@ class Go2PendulumEnv(DirectRLEnv):
                 critic_leg_joint_vel,
                 critic_pendulum_joint_pos,
                 critic_pendulum_joint_vel,
-                self._actions_executed,
+                self.last_action,
                 self.clock_inputs,
             ],
             dim=-1,
@@ -1091,16 +946,16 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_base_tilt_deg_count += 1
 
         rew_action_magnitude = torch.sum(
-            torch.square(self._actions_executed), dim=1
+            torch.square(self.last_action), dim=1
         ) * (self.cfg.action_scale**2)
 
         rew_action_rate = torch.sum(
-            torch.square(self._actions_executed - self.last_actions[:, :, 0]),
+            torch.square(self.last_action - self._action_history[:, :, 0]),
             dim=1,
         ) * (self.cfg.action_scale**2)
 
         rew_action_rate += torch.sum(
-            torch.square(self._actions_executed - 2 * self.last_actions[:, :, 0] + self.last_actions[:, :, 1]),
+            torch.square(self.last_action - 2 * self._action_history[:, :, 0] + self._action_history[:, :, 1]),
             dim=1,
         ) * (self.cfg.action_scale**2)
 
@@ -1165,8 +1020,8 @@ class Go2PendulumEnv(DirectRLEnv):
         # penalize high torques from the actuator model
         rew_torque = torch.sum(torch.square(self.robot.data.applied_torque[:, self._leg_dof_ids]), dim=1)
 
-        self.last_actions = torch.roll(self.last_actions, 1, 2)
-        self.last_actions[:, :, 0] = self._actions_executed[:]
+        self._action_history = torch.roll(self._action_history, 1, 2)
+        self._action_history[:, :, 0] = self.last_action[:]
 
         # gait shaping
         self._step_contact_targets()
@@ -1346,40 +1201,14 @@ class Go2PendulumEnv(DirectRLEnv):
             # Spread out the resets to avoid spikes in training when many environments reset at a similar time.
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
 
-        self._actions_raw_policy[env_ids] = 0.0
-        self._actions_delayed[env_ids] = 0.0
-        self._actions_executed[env_ids] = 0.0
-        self._action_delay_buffer[env_ids] = 0.0
+        self.last_action[env_ids] = 0.0
         self._steps_since_reset[env_ids] = 0
-        if self.cfg.enable_action_delay:
-            if self.cfg.action_delay_randomize_per_reset:
-                self._action_delay_steps[env_ids] = torch.randint(
-                    self.cfg.action_delay_steps_min,
-                    self.cfg.action_delay_steps_max + 1,
-                    (env_ids.shape[0],),
-                    device=self.device,
-                    dtype=torch.long,
-                )
-            else:
-                self._action_delay_steps[env_ids] = self.cfg.action_delay_steps_max
 
         if self.cfg.enable_domain_randomization:
             self._randomize_materials(env_ids)
             self._randomize_mass_and_com(env_ids)
             self._randomize_motor_gains(env_ids)
             self._sample_sensor_biases(env_ids)
-            if self.cfg.enable_obs_delay:
-                self._obs_delay_buffer.reset(env_ids)
-                if self.cfg.obs_delay_randomize_per_reset:
-                    self._obs_delay_steps[env_ids] = torch.randint(
-                        self.cfg.obs_delay_steps_min,
-                        self.cfg.obs_delay_steps_max + 1,
-                        (env_ids.numel(),),
-                        device=self.device,
-                        dtype=torch.long,
-                    )
-                else:
-                    self._obs_delay_steps[env_ids] = self.cfg.obs_delay_steps_max
             if self.cfg.enable_external_wrench_push:
                 self._push_forces[env_ids] = 0.0
                 self._push_torques[env_ids] = 0.0
@@ -1387,7 +1216,7 @@ class Go2PendulumEnv(DirectRLEnv):
                 self._schedule_next_push(env_ids, self._steps_since_reset[env_ids])
 
         # Reset variables.
-        self.last_actions[env_ids] = 0
+        self._action_history[env_ids] = 0
         self.gait_indices[env_ids] = 0
         if self._base_height_failure_steps is not None:
             self._base_height_failure_steps[env_ids] = 0

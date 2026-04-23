@@ -8,7 +8,7 @@
 #
 # This environment exposes a 56-D actor observation and expects a 12-D action.
 # The critic uses the same layout, but with clean ground-truth values instead of
-# noisy/delayed actor measurements.
+# noisy actor measurements.
 #
 # Observation layout (policy and critic):
 #   0:3    body linear velocity in base frame                      [vx, vy, vz]
@@ -35,7 +35,7 @@
 #   38:40  pendulum joint velocities                               [
 #             pendulum_joint1, pendulum_joint2,
 #          ]
-#   40:52  latest executed action command                          [
+#   40:52  last applied action command                             [
 #             FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint,
 #             FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint,
 #             FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint,
@@ -47,9 +47,8 @@
 # Notes:
 #   - The actor observation is the one used by the policy at inference time.
 #   - The actor observation includes the same kinds of effects used in training:
-#     sensor bias/drift, observation noise, and optional proprioceptive delay.
-#   - The "last action" term is the latest executed delayed command, not the
-#     newest raw model output.
+#     sensor bias/drift and observation noise.
+#   - The "last action" term is the latest action command applied by the task.
 #
 # Action layout:
 #   The policy outputs 12 floating-point values ordered as
@@ -61,11 +60,10 @@
 #
 # Action semantics:
 #   - These 12 values are joint-position offsets, not absolute joint targets.
-#   - The only post-policy processing kept in the environment is optional action
-#     delay. There is no downstream filtering or clamping in the task anymore.
-#   - After delay, the executed command is converted to desired joint positions:
+#   - There is no downstream filtering, delay, or clamping in the task.
+#   - The action is converted directly to desired joint positions:
 #
-#       q_des = q_default + action_scale * action_executed
+#       q_des = q_default + action_scale * action
 #
 #     with
 #       action_scale = 0.25  # radians per unit action
@@ -86,10 +84,8 @@
 # Inference recipe:
 #   1. Build the 56-D observation in the exact order above.
 #   2. Run the policy to obtain the 12-D joint-offset action.
-#   3. Apply the same action delay model used in deployment.
-#   4. Convert the delayed action to desired joint positions with the formula
-#      above.
-#   5. Send those desired joint positions to the robot's joint position
+#   3. Convert the action to desired joint positions with the formula above.
+#   4. Send those desired joint positions to the robot's joint position
 #      controller in the same joint order.
 # -----------------------------------------------------------------------------
 
@@ -195,10 +191,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     leg_joint_names = GO2_LEG_JOINT_NAMES
     action_space = len(leg_joint_names)
     action_scale = 0.25
-    enable_action_delay = False
-    action_delay_steps_min = 0
-    action_delay_steps_max = 1
-    action_delay_randomize_per_reset = True
     observation_space = 48 + 4 + 4
     state_space = 48 + 4 + 4  # Asymmetric actor-critic: critic obs dimension (set in __post_init__)
     debug_vis = True
@@ -323,15 +315,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     motor_stiffness_scale_range = (0.8, 1.2)
     motor_damping_scale_range = (0.8, 1.2)
     motor_gain_per_joint = True
-
-    # Observation delay.
-    enable_obs_delay = False
-    obs_delay_steps_min = 0
-    obs_delay_steps_max = 1
-    obs_delay_randomize_per_reset = False
-    obs_delay_jitter_prob = 0.0
-    obs_delay_jitter_extra_max = 0
-    obs_delay_proprio_only = True
 
     # Sensor bias and drift randomization.
     enable_sensor_bias_drift = True
