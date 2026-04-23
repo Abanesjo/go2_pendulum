@@ -209,7 +209,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Beyond that, training continues at the highest difficulty level.
     enable_curriculum = True
     curriculum_total_steps = 25000 * 32
-    difficulty_override: int = -1  # -1 = use curriculum, 1-5 = force that difficulty level
+    difficulty_override: int = 5  # -1 = use curriculum, 1-5 = force that difficulty level
 
     # --- Difficulty-dependent defaults (level 1 initial values) ---
     # These are updated at runtime by the difficulty curriculum.
@@ -325,7 +325,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     motor_gain_per_joint = True
 
     # Observation delay.
-    enable_obs_delay = True
+    enable_obs_delay = False
     obs_delay_steps_min = 0
     obs_delay_steps_max = 1
     obs_delay_randomize_per_reset = False
@@ -351,7 +351,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     encoder_pendulum_vel_drift_std_per_s = math.radians(0.1)
 
     # External wrench pushes.
-    enable_external_wrench_push = True
+    enable_external_wrench_push = False
     push_body_name = "base"
     push_is_global = True
     push_interval_s_min = 5.0
