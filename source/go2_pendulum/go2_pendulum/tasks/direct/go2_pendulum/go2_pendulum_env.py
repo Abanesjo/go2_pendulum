@@ -36,9 +36,9 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_angle_max=math.radians(0.0),
             pendulum_joint_limit_min_rad=math.radians(-90.0),
             pendulum_joint_limit_max_rad=math.radians(90.0),
-            termination_grace_s=0.1,
+            termination_grace_s=3.0,
             base_height_terminate_duration_s=10.0,
-            pendulum_terminate_angle_rad=math.radians(60.0),
+            pendulum_terminate_angle_rad=math.radians(15.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=5.0,
             enable_external_wrench_push=False,
@@ -51,11 +51,11 @@ class Go2PendulumEnv(DirectRLEnv):
             goal_yaw_randomization_max=math.radians(15),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(5.0),
-            pendulum_joint_limit_min_rad=math.radians(-90.0),
-            pendulum_joint_limit_max_rad=math.radians(90.0),
-            termination_grace_s=0.1,
+            pendulum_joint_limit_min_rad=math.radians(-20.0),
+            pendulum_joint_limit_max_rad=math.radians(20.0),
+            termination_grace_s=3.0,
             base_height_terminate_duration_s=10.0,
-            pendulum_terminate_angle_rad=math.radians(60.0),
+            pendulum_terminate_angle_rad=math.radians(15.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=0.5,
             enable_external_wrench_push=False,
@@ -68,11 +68,11 @@ class Go2PendulumEnv(DirectRLEnv):
             goal_yaw_randomization_max=math.radians(30),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(10.0),
-            pendulum_joint_limit_min_rad=math.radians(-90.0),
-            pendulum_joint_limit_max_rad=math.radians(90.0),
-            termination_grace_s=0.1,
+            pendulum_joint_limit_min_rad=math.radians(-20.0),
+            pendulum_joint_limit_max_rad=math.radians(20.0),
+            termination_grace_s=3.0,
             base_height_terminate_duration_s=10.0,
-            pendulum_terminate_angle_rad=math.radians(60.0),
+            pendulum_terminate_angle_rad=math.radians(15.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=0.3,
             enable_external_wrench_push=False,
@@ -85,11 +85,11 @@ class Go2PendulumEnv(DirectRLEnv):
             goal_yaw_randomization_max=math.radians(45),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(15.0),
-            pendulum_joint_limit_min_rad=math.radians(-90.0),
-            pendulum_joint_limit_max_rad=math.radians(90.0),
-            termination_grace_s=0.1,
+            pendulum_joint_limit_min_rad=math.radians(-20.0),
+            pendulum_joint_limit_max_rad=math.radians(20.0),
+            termination_grace_s=3.0,
             base_height_terminate_duration_s=10.0,
-            pendulum_terminate_angle_rad=math.radians(60.0),
+            pendulum_terminate_angle_rad=math.radians(15.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=0.2,
             enable_external_wrench_push=False,
@@ -104,11 +104,11 @@ class Go2PendulumEnv(DirectRLEnv):
             goal_yaw_randomization_max=math.radians(60),
             pendulum_angle_min=0.0,
             pendulum_angle_max=math.radians(20.0),
-            pendulum_joint_limit_min_rad=math.radians(-90.0),
-            pendulum_joint_limit_max_rad=math.radians(90.0),
-            termination_grace_s=0.1,
+            pendulum_joint_limit_min_rad=math.radians(-20.0),
+            pendulum_joint_limit_max_rad=math.radians(20.0),
+            termination_grace_s=3.0,
             base_height_terminate_duration_s=10.0,
-            pendulum_terminate_angle_rad=math.radians(60.0),
+            pendulum_terminate_angle_rad=math.radians(15.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=0.2,
             enable_external_wrench_push=False,
@@ -791,6 +791,7 @@ class Go2PendulumEnv(DirectRLEnv):
             dim=-1,
         )
         yaw_error = math_utils.wrap_to_pi(target_yaw - yaw)
+        critic_state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
 
         # Ground-truth (clean) quantities for critic.
         critic_body_lin_vel_b = self.robot.data.root_lin_vel_b.clone()
@@ -874,7 +875,7 @@ class Go2PendulumEnv(DirectRLEnv):
                     actor_pendulum_joint_vel.device,
                 )
 
-        state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
+        actor_state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
 
         # Policy obs (actor — potentially noisy).
         policy_obs = torch.cat(
@@ -882,7 +883,7 @@ class Go2PendulumEnv(DirectRLEnv):
                 actor_body_lin_vel_b,
                 actor_body_ang_vel_b,
                 actor_projected_gravity_b,
-                state_error,
+                actor_state_error,
                 actor_leg_joint_pos,
                 actor_leg_joint_vel,
                 actor_pendulum_joint_pos,
@@ -899,7 +900,7 @@ class Go2PendulumEnv(DirectRLEnv):
                 critic_body_lin_vel_b,
                 critic_body_ang_vel_b,
                 critic_projected_gravity_b,
-                state_error,
+                critic_state_error,
                 critic_leg_joint_pos,
                 critic_leg_joint_vel,
                 critic_pendulum_joint_pos,
