@@ -249,7 +249,16 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # --- Observation noise (applied to actor obs only at fixed max magnitude) ---
     # TODO(human): Tune these noise magnitudes based on real sensor characteristics.
-    # All values are uniform +/- noise in native units.
+    # Estimator-aligned actor channels:
+    #   - projected_gravity uses noisy IMU quaternion roll/pitch perturbations
+    #   - body_lin_vel and goal error use noisy Vicon/base-pose differencing
+    # The std values below are Gaussian standard deviations in native units.
+    imu_orientation_noise_std_rad = math.radians(1.0)
+    vicon_pos_noise_std_m = 0.001
+    vicon_orientation_noise_std_rad = math.radians(0.5)
+
+    # Deprecated/unused after the estimator-aligned IMU/Vicon refactor. Kept for
+    # config compatibility, but no longer consumed by the environment.
     body_lin_vel_noise = 0.1
     body_ang_vel_noise = 0.2
     orientation_noise = 0.05
@@ -313,12 +322,12 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
 
     # Sensor bias and drift randomization.
     enable_sensor_bias_drift = True
-    imu_lin_vel_bias_range = 0.05
+    imu_lin_vel_bias_range = 0.05  # deprecated/unused after the estimator-aligned IMU/Vicon refactor
     imu_ang_vel_bias_range = math.radians(3.0)
-    imu_gravity_bias_range = 0.03
-    imu_lin_vel_drift_std_per_s = 0.0
+    imu_gravity_bias_range = 0.03  # deprecated/unused after the estimator-aligned IMU/Vicon refactor
+    imu_lin_vel_drift_std_per_s = 0.0  # deprecated/unused after the estimator-aligned IMU/Vicon refactor
     imu_ang_vel_drift_std_per_s = math.radians(0.0)
-    imu_gravity_drift_std_per_s = 0.0
+    imu_gravity_drift_std_per_s = 0.0  # deprecated/unused after the estimator-aligned IMU/Vicon refactor
     encoder_joint_pos_bias_range = math.radians(1.0)
     encoder_joint_vel_bias_range = math.radians(5.0)
     encoder_pendulum_pos_bias_range = math.radians(1.0)

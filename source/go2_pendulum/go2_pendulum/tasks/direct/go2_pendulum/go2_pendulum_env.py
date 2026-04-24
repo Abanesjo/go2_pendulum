@@ -125,6 +125,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
     def __init__(self, cfg: Go2PendulumEnvCfg, render_mode: str | None = None, **kwargs):
         self._prev_base_pos_w = None
+        self._prev_vicon_base_pos_w = None
         super().__init__(cfg, render_mode, **kwargs)
 
         self._current_difficulty_level = 1
@@ -229,6 +230,7 @@ class Go2PendulumEnv(DirectRLEnv):
         self._world_up = torch.tensor([0.0, 0.0, 1.0], device=self.device)
         self._world_gravity_dir = torch.tensor([0.0, 0.0, -1.0], device=self.device).repeat(self.num_envs, 1)
         self._prev_base_pos_w = self.robot.data.root_pos_w.clone()
+        self._prev_vicon_base_pos_w = self.robot.data.root_pos_w.clone()
 
         # Logging.
         episode_sum_keys = [
@@ -314,6 +316,63 @@ class Go2PendulumEnv(DirectRLEnv):
             joint_ids=self._pendulum_dof_ids,
             warn_limit_violation=False,
         )
+
+    def _sample_gaussian_noise(self, shape: Sequence[int], std: float, dtype: torch.dtype) -> torch.Tensor:
+        if std <= 0.0:
+            return torch.zeros(shape, device=self.device, dtype=dtype)
+        return torch.randn(shape, device=self.device, dtype=dtype) * std
+
+    def _sample_orientation_noise_quat(
+        self,
+        num_envs: int,
+        dtype: torch.dtype,
+        roll_std_rad: float,
+        pitch_std_rad: float,
+        yaw_std_rad: float,
+    ) -> torch.Tensor:
+        roll_noise = self._sample_gaussian_noise((num_envs,), roll_std_rad, dtype)
+        pitch_noise = self._sample_gaussian_noise((num_envs,), pitch_std_rad, dtype)
+        yaw_noise = self._sample_gaussian_noise((num_envs,), yaw_std_rad, dtype)
+        return math_utils.quat_from_euler_xyz(roll_noise, pitch_noise, yaw_noise)
+
+    def _sample_noisy_pose(
+        self,
+        base_pos_w: torch.Tensor,
+        base_quat_w: torch.Tensor,
+        pos_noise_std_m: float,
+        orientation_noise_std_rad: float,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        pos_noise_w = self._sample_gaussian_noise(base_pos_w.shape, pos_noise_std_m, base_pos_w.dtype)
+        orientation_noise_quat = self._sample_orientation_noise_quat(
+            base_quat_w.shape[0],
+            base_quat_w.dtype,
+            orientation_noise_std_rad,
+            orientation_noise_std_rad,
+            orientation_noise_std_rad,
+        )
+        noisy_pos_w = base_pos_w + pos_noise_w
+        noisy_quat_w = math_utils.quat_mul(orientation_noise_quat, base_quat_w)
+        return noisy_pos_w, noisy_quat_w
+
+    def _compute_goal_error_terms(
+        self,
+        base_pos_xy: torch.Tensor,
+        base_yaw: torch.Tensor,
+        target_xy: torch.Tensor,
+        target_yaw: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        position_error_xy_world = target_xy - base_pos_xy
+        cos_yaw = torch.cos(base_yaw)
+        sin_yaw = torch.sin(base_yaw)
+        position_error_xy = torch.stack(
+            (
+                cos_yaw * position_error_xy_world[:, 0] + sin_yaw * position_error_xy_world[:, 1],
+                -sin_yaw * position_error_xy_world[:, 0] + cos_yaw * position_error_xy_world[:, 1],
+            ),
+            dim=-1,
+        )
+        yaw_error = math_utils.wrap_to_pi(target_yaw - base_yaw)
+        return position_error_xy, yaw_error
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
@@ -424,7 +483,9 @@ class Go2PendulumEnv(DirectRLEnv):
             self._motor_default_damping = self._motor_actuator.damping.clone()
             self._motor_num_joints = self._motor_default_stiffness.shape[1]
 
-        # Sensor bias / drift state.
+        # Sensor bias / drift state. Legacy linear-velocity and projected-gravity
+        # buffers remain allocated for compatibility with older configs, but the
+        # estimator-aligned actor observation no longer consumes them.
         self._bias_body_lin_vel = torch.zeros((self.num_envs, 3), device=self.device)
         self._bias_body_ang_vel = torch.zeros((self.num_envs, 3), device=self.device)
         self._bias_projected_gravity = torch.zeros((self.num_envs, 3), device=self.device)
@@ -508,15 +569,11 @@ class Go2PendulumEnv(DirectRLEnv):
         num_envs = env_ids.numel()
         if num_envs == 0:
             return
-        self._bias_body_lin_vel[env_ids] = self._sample_uniform_device(
-            (-self.cfg.imu_lin_vel_bias_range, self.cfg.imu_lin_vel_bias_range), (num_envs, 3), self.device
-        )
+        self._bias_body_lin_vel[env_ids] = 0.0
         self._bias_body_ang_vel[env_ids] = self._sample_uniform_device(
             (-self.cfg.imu_ang_vel_bias_range, self.cfg.imu_ang_vel_bias_range), (num_envs, 3), self.device
         )
-        self._bias_projected_gravity[env_ids] = self._sample_uniform_device(
-            (-self.cfg.imu_gravity_bias_range, self.cfg.imu_gravity_bias_range), (num_envs, 3), self.device
-        )
+        self._bias_projected_gravity[env_ids] = 0.0
         self._bias_leg_joint_pos[env_ids] = self._sample_uniform_device(
             (-self.cfg.encoder_joint_pos_bias_range, self.cfg.encoder_joint_pos_bias_range),
             (num_envs, self._action_dim),
@@ -543,14 +600,8 @@ class Go2PendulumEnv(DirectRLEnv):
         if not (self.cfg.enable_domain_randomization and self.cfg.enable_sensor_bias_drift):
             return
         drift_scale = math.sqrt(self.step_dt)
-        self._bias_body_lin_vel += torch.randn_like(self._bias_body_lin_vel) * (
-            self.cfg.imu_lin_vel_drift_std_per_s * drift_scale
-        )
         self._bias_body_ang_vel += torch.randn_like(self._bias_body_ang_vel) * (
             self.cfg.imu_ang_vel_drift_std_per_s * drift_scale
-        )
-        self._bias_projected_gravity += torch.randn_like(self._bias_projected_gravity) * (
-            self.cfg.imu_gravity_drift_std_per_s * drift_scale
         )
         self._bias_leg_joint_pos += torch.randn_like(self._bias_leg_joint_pos) * (
             self.cfg.encoder_joint_pos_drift_std_per_s * drift_scale
@@ -566,14 +617,8 @@ class Go2PendulumEnv(DirectRLEnv):
                 self.cfg.encoder_pendulum_vel_drift_std_per_s * drift_scale
             )
 
-        self._bias_body_lin_vel = torch.clamp(
-            self._bias_body_lin_vel, -self.cfg.imu_lin_vel_bias_range, self.cfg.imu_lin_vel_bias_range
-        )
         self._bias_body_ang_vel = torch.clamp(
             self._bias_body_ang_vel, -self.cfg.imu_ang_vel_bias_range, self.cfg.imu_ang_vel_bias_range
-        )
-        self._bias_projected_gravity = torch.clamp(
-            self._bias_projected_gravity, -self.cfg.imu_gravity_bias_range, self.cfg.imu_gravity_bias_range
         )
         self._bias_leg_joint_pos = torch.clamp(
             self._bias_leg_joint_pos, -self.cfg.encoder_joint_pos_bias_range, self.cfg.encoder_joint_pos_bias_range
@@ -730,8 +775,9 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_joint_vel_raw = torch.zeros_like(pendulum_joint_pos_raw)
 
         env_origins = self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
-        base_pos_xy = self.robot.data.root_pos_w[:, :2] - env_origins[:, :2]
-        _, _, yaw = math_utils.euler_xyz_from_quat(self.robot.data.root_quat_w)
+        base_pos_w = self.robot.data.root_pos_w.clone()
+        base_quat_w = self.robot.data.root_quat_w.clone()
+        imu_quat_w = self._imu_sensor.data.quat_w.clone()
 
         if self.target_state is not None:
             target_xy = self.target_state[:, :2]
@@ -740,28 +786,18 @@ class Go2PendulumEnv(DirectRLEnv):
             target_xy = torch.zeros((self.num_envs, 2), device=self.device, dtype=leg_joint_pos_raw.dtype)
             target_yaw = torch.zeros(self.num_envs, device=self.device, dtype=leg_joint_pos_raw.dtype)
 
-        position_error_xy_world = target_xy - base_pos_xy
-        cos_yaw = torch.cos(yaw)
-        sin_yaw = torch.sin(yaw)
-        position_error_xy = torch.stack(
-            (
-                cos_yaw * position_error_xy_world[:, 0] + sin_yaw * position_error_xy_world[:, 1],
-                -sin_yaw * position_error_xy_world[:, 0] + cos_yaw * position_error_xy_world[:, 1],
-            ),
-            dim=-1,
-        )
-        yaw_error = math_utils.wrap_to_pi(target_yaw - yaw)
-        critic_state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
-
-        imu_quat_w = self._imu_sensor.data.quat_w.clone()
-
         # Match deployment by differentiating base pose for linear velocity,
         # using IMU gyro for angular velocity, and reconstructing gravity from IMU quaternion.
-        base_pos_w = self.robot.data.root_pos_w.clone()
         base_lin_vel_w = (base_pos_w - self._prev_base_pos_w) / self.step_dt
         self._prev_base_pos_w.copy_(base_pos_w)
+        base_pos_xy = base_pos_w[:, :2] - env_origins[:, :2]
+        _, _, base_yaw = math_utils.euler_xyz_from_quat(base_quat_w)
+        critic_position_error_xy, critic_yaw_error = self._compute_goal_error_terms(
+            base_pos_xy, base_yaw, target_xy, target_yaw
+        )
+        critic_state_error = torch.cat([critic_position_error_xy, critic_yaw_error.unsqueeze(-1)], dim=-1)
 
-        critic_body_lin_vel_b = math_utils.quat_apply_inverse(self.robot.data.root_quat_w, base_lin_vel_w)
+        critic_body_lin_vel_b = math_utils.quat_apply_inverse(base_quat_w, base_lin_vel_w)
         critic_body_ang_vel_b = self._imu_sensor.data.ang_vel_b.clone()
         critic_projected_gravity_b = math_utils.quat_apply_inverse(imu_quat_w, self._world_gravity_dir)
         critic_leg_joint_pos = leg_joint_pos_raw.clone()
@@ -777,13 +813,34 @@ class Go2PendulumEnv(DirectRLEnv):
         actor_leg_joint_vel = leg_joint_vel_raw.clone()
         actor_pendulum_joint_pos = pendulum_joint_pos_raw.clone()
         actor_pendulum_joint_vel = pendulum_joint_vel_raw.clone()
+        actor_imu_orientation_noise = self._sample_orientation_noise_quat(
+            self.num_envs,
+            imu_quat_w.dtype,
+            self.cfg.imu_orientation_noise_std_rad,
+            self.cfg.imu_orientation_noise_std_rad,
+            0.0,
+        )
+        actor_imu_quat_w = math_utils.quat_mul(actor_imu_orientation_noise, imu_quat_w)
+        actor_projected_gravity_b = math_utils.quat_apply_inverse(actor_imu_quat_w, self._world_gravity_dir)
+        actor_base_pos_w, actor_base_quat_w = self._sample_noisy_pose(
+            base_pos_w,
+            base_quat_w,
+            self.cfg.vicon_pos_noise_std_m,
+            self.cfg.vicon_orientation_noise_std_rad,
+        )
+        actor_base_lin_vel_w = (actor_base_pos_w - self._prev_vicon_base_pos_w) / self.step_dt
+        self._prev_vicon_base_pos_w.copy_(actor_base_pos_w)
+        actor_body_lin_vel_b = math_utils.quat_apply_inverse(actor_base_quat_w, actor_base_lin_vel_w)
+        actor_base_pos_xy = actor_base_pos_w[:, :2] - env_origins[:, :2]
+        _, _, actor_base_yaw = math_utils.euler_xyz_from_quat(actor_base_quat_w)
+        actor_position_error_xy, actor_yaw_error = self._compute_goal_error_terms(
+            actor_base_pos_xy, actor_base_yaw, target_xy, target_yaw
+        )
 
         # Apply sensor bias/drift (if DR enabled).
         self._update_sensor_bias_drift()
         if self.cfg.enable_domain_randomization and self.cfg.enable_sensor_bias_drift:
-            actor_body_lin_vel_b = actor_body_lin_vel_b + self._bias_body_lin_vel
             actor_body_ang_vel_b = actor_body_ang_vel_b + self._bias_body_ang_vel
-            actor_projected_gravity_b = actor_projected_gravity_b + self._bias_projected_gravity
             actor_leg_joint_pos = actor_leg_joint_pos + self._bias_leg_joint_pos
             actor_leg_joint_vel = actor_leg_joint_vel + self._bias_leg_joint_vel
             if self._pendulum_dof_count > 0:
@@ -791,40 +848,16 @@ class Go2PendulumEnv(DirectRLEnv):
                 actor_pendulum_joint_vel = actor_pendulum_joint_vel + self._bias_pendulum_joint_vel
 
         # Apply fixed-magnitude observation noise.
-        body_lin_vel_noise = self.cfg.body_lin_vel_noise
         body_ang_vel_noise = self.cfg.body_ang_vel_noise
-        position_noise = self.cfg.position_noise
-        orientation_noise = self.cfg.orientation_noise
         pendulum_joint_pos_noise = self.cfg.pendulum_joint_pos_noise
         pendulum_joint_vel_noise = self.cfg.pendulum_joint_vel_noise
 
-        if body_lin_vel_noise > 0.0:
-            actor_body_lin_vel_b = actor_body_lin_vel_b + sample_uniform(
-                -body_lin_vel_noise,
-                body_lin_vel_noise,
-                actor_body_lin_vel_b.shape,
-                actor_body_lin_vel_b.device,
-            )
         if body_ang_vel_noise > 0.0:
             actor_body_ang_vel_b = actor_body_ang_vel_b + sample_uniform(
                 -body_ang_vel_noise,
                 body_ang_vel_noise,
                 actor_body_ang_vel_b.shape,
                 actor_body_ang_vel_b.device,
-            )
-        if position_noise > 0.0:
-            position_error_xy = position_error_xy + sample_uniform(
-                -position_noise,
-                position_noise,
-                position_error_xy.shape,
-                position_error_xy.device,
-            )
-        if orientation_noise > 0.0:
-            yaw_error = yaw_error + sample_uniform(
-                -orientation_noise,
-                orientation_noise,
-                yaw_error.shape,
-                yaw_error.device,
             )
         if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
             if pendulum_joint_pos_noise > 0.0:
@@ -842,7 +875,7 @@ class Go2PendulumEnv(DirectRLEnv):
                     actor_pendulum_joint_vel.device,
                 )
 
-        actor_state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
+        actor_state_error = torch.cat([actor_position_error_xy, actor_yaw_error.unsqueeze(-1)], dim=-1)
 
         # Policy obs (actor — potentially noisy).
         policy_obs = torch.cat(
@@ -1246,6 +1279,14 @@ class Go2PendulumEnv(DirectRLEnv):
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
         if self._prev_base_pos_w is not None:
             self._prev_base_pos_w[env_ids] = default_root_state[:, :3]
+        if self._prev_vicon_base_pos_w is not None:
+            noisy_reset_pos_w, _ = self._sample_noisy_pose(
+                default_root_state[:, :3],
+                default_root_state[:, 3:7],
+                self.cfg.vicon_pos_noise_std_m,
+                self.cfg.vicon_orientation_noise_std_rad,
+            )
+            self._prev_vicon_base_pos_w[env_ids] = noisy_reset_pos_w
         self._imu_sensor.reset(env_ids)
 
         # Initialize progress baseline so the first step in an episode has well-defined progress.
