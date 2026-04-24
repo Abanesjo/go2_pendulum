@@ -16,6 +16,7 @@ from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.sensors import ContactSensor
+from isaaclab.sensors.imu import Imu
 from isaaclab.utils.math import sample_uniform
 
 from .go2_pendulum_env_cfg import Go2PendulumEnvCfg
@@ -123,6 +124,7 @@ class Go2PendulumEnv(DirectRLEnv):
     }
 
     def __init__(self, cfg: Go2PendulumEnvCfg, render_mode: str | None = None, **kwargs):
+        self._prev_base_pos_w = None
         super().__init__(cfg, render_mode, **kwargs)
 
         self._current_difficulty_level = 1
@@ -225,6 +227,8 @@ class Go2PendulumEnv(DirectRLEnv):
         self._marker_locations = None
         self._marker_up = torch.tensor([0.0, 0.0, 1.0])
         self._world_up = torch.tensor([0.0, 0.0, 1.0], device=self.device)
+        self._world_gravity_dir = torch.tensor([0.0, 0.0, -1.0], device=self.device).repeat(self.num_envs, 1)
+        self._prev_base_pos_w = self.robot.data.root_pos_w.clone()
 
         # Logging.
         episode_sum_keys = [
@@ -314,6 +318,7 @@ class Go2PendulumEnv(DirectRLEnv):
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
+        self._imu_sensor = Imu(self.cfg.imu_sensor)
         self._pendulum_contact_sensor = None
         if self.cfg.use_pendulum:
             self._pendulum_contact_sensor = ContactSensor(self.cfg.pendulum_contact_sensor)
@@ -321,6 +326,7 @@ class Go2PendulumEnv(DirectRLEnv):
         # register assets and sensors so they get replicated and updated
         self.scene.articulations["robot"] = self.robot
         self.scene.sensors["contact_sensor"] = self._contact_sensor
+        self.scene.sensors["imu_sensor"] = self._imu_sensor
         if self._pendulum_contact_sensor is not None:
             self.scene.sensors["pendulum_contact_sensor"] = self._pendulum_contact_sensor
 
@@ -747,10 +753,17 @@ class Go2PendulumEnv(DirectRLEnv):
         yaw_error = math_utils.wrap_to_pi(target_yaw - yaw)
         critic_state_error = torch.cat([position_error_xy, yaw_error.unsqueeze(-1)], dim=-1)
 
-        # Ground-truth (clean) quantities for critic.
-        critic_body_lin_vel_b = self.robot.data.root_lin_vel_b.clone()
-        critic_body_ang_vel_b = self.robot.data.root_ang_vel_b.clone()
-        critic_projected_gravity_b = self.robot.data.projected_gravity_b.clone()
+        imu_quat_w = self._imu_sensor.data.quat_w.clone()
+
+        # Match deployment by differentiating base pose for linear velocity,
+        # using IMU gyro for angular velocity, and reconstructing gravity from IMU quaternion.
+        base_pos_w = self.robot.data.root_pos_w.clone()
+        base_lin_vel_w = (base_pos_w - self._prev_base_pos_w) / self.step_dt
+        self._prev_base_pos_w.copy_(base_pos_w)
+
+        critic_body_lin_vel_b = math_utils.quat_apply_inverse(self.robot.data.root_quat_w, base_lin_vel_w)
+        critic_body_ang_vel_b = self._imu_sensor.data.ang_vel_b.clone()
+        critic_projected_gravity_b = math_utils.quat_apply_inverse(imu_quat_w, self._world_gravity_dir)
         critic_leg_joint_pos = leg_joint_pos_raw.clone()
         critic_leg_joint_vel = leg_joint_vel_raw.clone()
         critic_pendulum_joint_pos = pendulum_joint_pos_raw.clone()
@@ -1231,6 +1244,9 @@ class Go2PendulumEnv(DirectRLEnv):
         self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
+        if self._prev_base_pos_w is not None:
+            self._prev_base_pos_w[env_ids] = default_root_state[:, :3]
+        self._imu_sensor.reset(env_ids)
 
         # Initialize progress baseline so the first step in an episode has well-defined progress.
         initial_base_pos_xy = default_root_state[:, :2] - self._terrain.env_origins[env_ids, :2]

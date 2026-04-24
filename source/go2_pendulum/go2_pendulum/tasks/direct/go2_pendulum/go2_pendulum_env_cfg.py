@@ -12,8 +12,11 @@
 #
 # Observation layout (policy and critic):
 #   0:3    body linear velocity in base frame                      [vx, vy, vz]
+#          computed from finite-differenced base pose
 #   3:6    body angular velocity in base frame                     [wx, wy, wz]
+#          from the simulated IMU gyroscope
 #   6:9    projected gravity in base frame                        [gx, gy, gz]
+#          reconstructed from the simulated IMU quaternion
 #   9:12   target-state error in base frame                        [
 #             target_x_error_body,
 #             target_y_error_body,
@@ -100,6 +103,7 @@ from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg
+from isaaclab.sensors.imu import ImuCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
@@ -376,6 +380,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     )
     pendulum_contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/pendulum_ee", history_length=1, update_period=0.005, track_air_time=False
+    )
+    imu_sensor: ImuCfg = ImuCfg(
+        prim_path="/World/envs/env_.*/Robot/base",
+        update_period=0.0,
+        debug_vis=False,
     )
 
     target_marker_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
