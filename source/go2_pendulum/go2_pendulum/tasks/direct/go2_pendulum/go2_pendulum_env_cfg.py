@@ -213,7 +213,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     # Curriculum completes over 75000 * 32 environment steps.
     # Beyond that, training continues at the highest difficulty level.
     enable_curriculum = True
-    curriculum_total_steps = 25000 * 32
+    curriculum_total_steps = 5 * 10000 * 32
     difficulty_override: int = -1  # -1 = use curriculum, 1-5 = force that difficulty level
 
     # --- Difficulty-dependent defaults (level 1 initial values) ---
