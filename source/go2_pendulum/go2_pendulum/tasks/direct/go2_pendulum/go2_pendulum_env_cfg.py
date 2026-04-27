@@ -110,7 +110,7 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
-GO2_PENDULUM_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_model", "go2_pendulum.usd")
+GO2_PENDULUM_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_model", "go2_pendulum_realistic.usd")
 GO2_USD_PATH = os.path.join(os.path.dirname(__file__), "go2_model", "go2.usd")
 
 GO2_LEG_JOINT_NAMES = [
