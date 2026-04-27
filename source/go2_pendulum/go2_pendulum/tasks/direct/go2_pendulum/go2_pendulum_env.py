@@ -136,7 +136,6 @@ class Go2PendulumEnv(DirectRLEnv):
 
     def __init__(self, cfg: Go2PendulumEnvCfg, render_mode: str | None = None, **kwargs):
         self._prev_base_pos_w = None
-        self._prev_vicon_base_pos_w = None
         super().__init__(cfg, render_mode, **kwargs)
 
         self._current_difficulty_level = 1
@@ -241,7 +240,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self._world_up = torch.tensor([0.0, 0.0, 1.0], device=self.device)
         self._world_gravity_dir = torch.tensor([0.0, 0.0, -1.0], device=self.device).repeat(self.num_envs, 1)
         self._prev_base_pos_w = self.robot.data.root_pos_w.clone()
-        self._prev_vicon_base_pos_w = self.robot.data.root_pos_w.clone()
 
         # Logging.
         episode_sum_keys = [
@@ -331,43 +329,6 @@ class Go2PendulumEnv(DirectRLEnv):
             warn_limit_violation=False,
         )
 
-    def _sample_gaussian_noise(self, shape: Sequence[int], std: float, dtype: torch.dtype) -> torch.Tensor:
-        if std <= 0.0:
-            return torch.zeros(shape, device=self.device, dtype=dtype)
-        return torch.randn(shape, device=self.device, dtype=dtype) * std
-
-    def _sample_orientation_noise_quat(
-        self,
-        num_envs: int,
-        dtype: torch.dtype,
-        roll_std_rad: float,
-        pitch_std_rad: float,
-        yaw_std_rad: float,
-    ) -> torch.Tensor:
-        roll_noise = self._sample_gaussian_noise((num_envs,), roll_std_rad, dtype)
-        pitch_noise = self._sample_gaussian_noise((num_envs,), pitch_std_rad, dtype)
-        yaw_noise = self._sample_gaussian_noise((num_envs,), yaw_std_rad, dtype)
-        return math_utils.quat_from_euler_xyz(roll_noise, pitch_noise, yaw_noise)
-
-    def _sample_noisy_pose(
-        self,
-        base_pos_w: torch.Tensor,
-        base_quat_w: torch.Tensor,
-        pos_noise_std_m: float,
-        orientation_noise_std_rad: float,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        pos_noise_w = self._sample_gaussian_noise(base_pos_w.shape, pos_noise_std_m, base_pos_w.dtype)
-        orientation_noise_quat = self._sample_orientation_noise_quat(
-            base_quat_w.shape[0],
-            base_quat_w.dtype,
-            orientation_noise_std_rad,
-            orientation_noise_std_rad,
-            orientation_noise_std_rad,
-        )
-        noisy_pos_w = base_pos_w + pos_noise_w
-        noisy_quat_w = math_utils.quat_mul(orientation_noise_quat, base_quat_w)
-        return noisy_pos_w, noisy_quat_w
-
     def _compute_goal_error_terms(
         self,
         base_pos_xy: torch.Tensor,
@@ -429,21 +390,12 @@ class Go2PendulumEnv(DirectRLEnv):
         self._validate_range("com_offset_x_range", self.cfg.com_offset_x_range)
         self._validate_range("com_offset_y_range", self.cfg.com_offset_y_range)
         self._validate_range("com_offset_z_range", self.cfg.com_offset_z_range)
-        self._validate_range("motor_stiffness_scale_range", self.cfg.motor_stiffness_scale_range)
-        self._validate_range("motor_damping_scale_range", self.cfg.motor_damping_scale_range)
         self._validate_range("motor_strength_range", self.cfg.motor_strength_range)
         self._validate_range("kp_scale_range", self.cfg.kp_scale_range)
         self._validate_range("kd_scale_range", self.cfg.kd_scale_range)
         self._validate_range("effort_limit_scale_range", self.cfg.effort_limit_scale_range)
         self._validate_range("torque_response_tau_s_range", self.cfg.torque_response_tau_s_range)
-        if self.cfg.motor_stiffness_scale_range[0] <= 0.0:
-            raise ValueError(
-                f"motor_stiffness_scale_range min must be > 0. Got {self.cfg.motor_stiffness_scale_range[0]}."
-            )
-        if self.cfg.motor_damping_scale_range[0] <= 0.0:
-            raise ValueError(
-                f"motor_damping_scale_range min must be > 0. Got {self.cfg.motor_damping_scale_range[0]}."
-            )
+        self._validate_range("pendulum_damping_range", self.cfg.pendulum_damping_range)
         for name in ("motor_strength_range", "kp_scale_range", "kd_scale_range", "effort_limit_scale_range"):
             if getattr(self.cfg, name)[0] <= 0.0:
                 raise ValueError(f"{name} min must be > 0. Got {getattr(self.cfg, name)[0]}.")
@@ -451,6 +403,11 @@ class Go2PendulumEnv(DirectRLEnv):
             raise ValueError(
                 "torque_response_tau_s_range min must be >= 0. "
                 f"Got {self.cfg.torque_response_tau_s_range[0]}."
+            )
+        if self.cfg.pendulum_damping_range[0] < 0.0:
+            raise ValueError(
+                "pendulum_damping_range min must be >= 0. "
+                f"Got {self.cfg.pendulum_damping_range[0]}."
             )
         self._validate_step_range("action_delay_steps_range", self.cfg.action_delay_steps_range)
         self._validate_step_range("proprio_delay_steps_range", self.cfg.proprio_delay_steps_range)
@@ -701,6 +658,16 @@ class Go2PendulumEnv(DirectRLEnv):
                 self._motor_actuator._vel_at_effort_lim = self._motor_actuator.velocity_limit * (
                     1.0 + self._motor_actuator.effort_limit / self._motor_actuator._saturation_effort
                 )
+
+    def _randomize_pendulum_damping(self, env_ids: torch.Tensor) -> None:
+        if not (self.cfg.enable_domain_randomization and self.cfg.enable_pendulum_damping_randomization):
+            return
+        num_envs = env_ids.numel()
+        if num_envs == 0 or self._pendulum_dof_ids.numel() == 0:
+            return
+        damping = self._sample_uniform_device(self.cfg.pendulum_damping_range, (num_envs, 1), self.device)
+        damping = damping.expand(num_envs, self._pendulum_dof_ids.numel())
+        self.robot.write_joint_damping_to_sim(damping, joint_ids=self._pendulum_dof_ids, env_ids=env_ids)
 
     def _sample_transport_randomization(self, env_ids: torch.Tensor) -> None:
         if env_ids.numel() == 0:
@@ -1460,6 +1427,7 @@ class Go2PendulumEnv(DirectRLEnv):
         if self.cfg.enable_domain_randomization:
             self._randomize_mass_and_com(env_ids)
             self._randomize_motor_gains(env_ids)
+            self._randomize_pendulum_damping(env_ids)
             self._sample_sensor_biases(env_ids)
             if self.cfg.enable_external_wrench_push:
                 self._push_forces[env_ids] = 0.0
@@ -1558,14 +1526,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
         if self._prev_base_pos_w is not None:
             self._prev_base_pos_w[env_ids] = default_root_state[:, :3]
-        if self._prev_vicon_base_pos_w is not None:
-            noisy_reset_pos_w, _ = self._sample_noisy_pose(
-                default_root_state[:, :3],
-                default_root_state[:, 3:7],
-                self.cfg.vicon_pos_noise_std_m,
-                self.cfg.vicon_orientation_noise_std_rad,
-            )
-            self._prev_vicon_base_pos_w[env_ids] = noisy_reset_pos_w
         self._imu_sensor.reset(env_ids)
 
         # Initialize progress baseline so the first step in an episode has well-defined progress.

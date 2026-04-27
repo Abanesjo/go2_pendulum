@@ -285,17 +285,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_vel_noise_rad_s = 0.40
     pendulum_vel_bias_rad_s = 0.05
 
-    # Deprecated/unused compatibility fields from earlier estimator-aligned DR.
-    imu_orientation_noise_std_rad = math.radians(1.0)
-    vicon_pos_noise_std_m = 0.001
-    vicon_orientation_noise_std_rad = math.radians(0.5)
-    body_lin_vel_noise = 0.1
-    body_ang_vel_noise = 0.2
-    orientation_noise = 0.05
-    position_noise = 0.01
-    pendulum_joint_pos_noise = math.radians(0.06)
-    pendulum_joint_vel_noise = math.radians(3.0)
-
     # Position tracking and heading alignment.
     position_reward_scale = 0.4
     position_reward_sigma = 0.3
@@ -307,7 +296,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_upright_reward_scale = 0.45
     pendulum_upright_reward_sigma = 0.15
     pendulum_vel_reward_scale = -0.1
-    pendulum_vel_reward_sigma = 0.05  # unused with squared-velocity penalty
     balanced_movement_reward_scale = 0.1
 
     # Quadruped motion regularization and gait shaping.
@@ -331,7 +319,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     base_height_reward_sigma = 0.1
     base_height_reward_scale = 0.2
 
-    # --- Domain randomization (disabled by default, enable for sim-to-real) ---
+    # --- Domain randomization ---
     enable_domain_randomization = True
     dr_seed_offset = 0
 
@@ -340,7 +328,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     mass_randomize_body_name = "base"
     mass_scale_range = (0.9, 1.2)
     mass_recompute_inertia = True
-    enable_com_randomization = False
+    enable_com_randomization = True
     com_offset_x_range = (-0.03, 0.03)
     com_offset_y_range = (-0.03, 0.03)
     com_offset_z_range = (-0.02, 0.05)
@@ -353,18 +341,14 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     kd_scale_range = (0.5, 1.5)
     effort_limit_scale_range = (0.7, 1.0)
     torque_response_tau_s_range = (0.005, 0.020)
-    motor_stiffness_scale_range = kp_scale_range
-    motor_damping_scale_range = kd_scale_range
-    motor_gain_per_joint = False
+    motor_gain_per_joint = True
+    enable_pendulum_damping_randomization = True
+    pendulum_damping_range = (0.0, 0.5)
 
     # Sensor bias and drift randomization.
     enable_sensor_bias_drift = True
-    imu_lin_vel_bias_range = 0.05  # deprecated/unused after the estimator-aligned IMU/Vicon refactor
     imu_ang_vel_bias_range = math.radians(3.0)
-    imu_gravity_bias_range = 0.03  # deprecated/unused after the estimator-aligned IMU/Vicon refactor
-    imu_lin_vel_drift_std_per_s = 0.0  # deprecated/unused after the estimator-aligned IMU/Vicon refactor
     imu_ang_vel_drift_std_per_s = math.radians(0.0)
-    imu_gravity_drift_std_per_s = 0.0  # deprecated/unused after the estimator-aligned IMU/Vicon refactor
     encoder_joint_pos_bias_range = math.radians(1.0)
     encoder_joint_vel_bias_range = math.radians(5.0)
     encoder_pendulum_pos_bias_range = math.radians(1.0)
@@ -375,7 +359,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     encoder_pendulum_vel_drift_std_per_s = math.radians(0.0)
 
     # External wrench pushes.
-    enable_external_wrench_push = False
+    enable_external_wrench_push = True
     push_body_name = "base"
     push_is_global = True
     push_interval_s_min = 5.0
@@ -459,7 +443,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
                 "pendulum_joint_names contains duplicates. It must define a unique canonical pendulum joint order."
             )
 
-        # Keep pendulum toggle behavior available, but disable by default.
+        # Keep pendulum-free evaluation available by swapping to the base Go2 USD.
         if not self.use_pendulum:
             self.robot_cfg = self.robot_cfg.replace(
                 spawn=self.robot_cfg.spawn.replace(usd_path=GO2_USD_PATH),
