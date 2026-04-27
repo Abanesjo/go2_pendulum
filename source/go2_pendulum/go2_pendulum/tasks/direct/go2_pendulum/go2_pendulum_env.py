@@ -27,99 +27,110 @@ class Go2PendulumEnv(DirectRLEnv):
 
     # Difficulty presets: values for each curriculum level, applied at runtime.
     _DIFFICULTY_PRESETS = {
-        # Stand and balance only. No goals, tiny spawn perturbation, no pushes.
         1: dict(
             goal_randomization_dist_min=0.0,
             goal_randomization_dist_max=0.1,
+            goal_randomization_angle_min=math.radians(-180),
+            goal_randomization_angle_max=math.radians(180),
             goal_yaw_randomization_min=0.0,
             goal_yaw_randomization_max=0.0,
-            pendulum_angle_min=0.0,
-            pendulum_angle_max=math.radians(0.0),
-            pendulum_joint_limit_min_rad=math.radians(-90.0),
-            pendulum_joint_limit_max_rad=math.radians(90.0),
+            pendulum_angle_min=math.radians(0.0),
+            pendulum_angle_max=math.radians(5.0),
+            pendulum_joint_limit_min_rad=math.radians(-20.0),
+            pendulum_joint_limit_max_rad=math.radians(20.0),
             termination_grace_s=0.1,
-            pendulum_termination_grace_s=3.0,
+            pendulum_termination_grace_s=0.1,
             base_height_terminate_duration_s=10.0,
             pendulum_terminate_angle_rad=math.radians(19.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=1.0,
             enable_external_wrench_push=False,
+            push_force_x_range=(0.0, 0.0),
+            push_force_y_range=(0.0, 0.0),
         ),
-        # Learn to take small steps. Small goals, slightly larger spawn angle. No pushes.
         2: dict(
             goal_randomization_dist_min=0.0,
             goal_randomization_dist_max=0.15,
+            goal_randomization_angle_min=math.radians(-180),
+            goal_randomization_angle_max=math.radians(180),
             goal_yaw_randomization_min=math.radians(-15),
             goal_yaw_randomization_max=math.radians(15),
-            pendulum_angle_min=0.0,
-            pendulum_angle_max=math.radians(5.0),
-            pendulum_joint_limit_min_rad=math.radians(-10.0),
-            pendulum_joint_limit_max_rad=math.radians(10.0),
+            pendulum_angle_min=math.radians(0.0),
+            pendulum_angle_max=math.radians(10.0),
+            pendulum_joint_limit_min_rad=math.radians(-20.0),
+            pendulum_joint_limit_max_rad=math.radians(20.0),
             termination_grace_s=0.1,
-            pendulum_termination_grace_s=3.0,
+            pendulum_termination_grace_s=0.1,
             base_height_terminate_duration_s=10.0,
             pendulum_terminate_angle_rad=math.radians(19.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=0.5,
             enable_external_wrench_push=False,
+            push_force_x_range=(0.0, 0.0),
+            push_force_y_range=(0.0, 0.0),
         ),
-        # Walk further, turn more, and accept larger pendulum errors. Still no pushes.
         3: dict(
             goal_randomization_dist_min=0.1,
             goal_randomization_dist_max=0.3,
+            goal_randomization_angle_min=math.radians(-180),
+            goal_randomization_angle_max=math.radians(180),
             goal_yaw_randomization_min=math.radians(-30),
             goal_yaw_randomization_max=math.radians(30),
-            pendulum_angle_min=0.0,
-            pendulum_angle_max=math.radians(9.9),
-            pendulum_joint_limit_min_rad=math.radians(-10.0),
-            pendulum_joint_limit_max_rad=math.radians(10.0),
+            pendulum_angle_min=math.radians(5.0),
+            pendulum_angle_max=math.radians(15.0),
+            pendulum_joint_limit_min_rad=math.radians(-20.0),
+            pendulum_joint_limit_max_rad=math.radians(20.0),
             termination_grace_s=0.1,
-            pendulum_termination_grace_s=3.0,
+            pendulum_termination_grace_s=0.1,
             base_height_terminate_duration_s=10.0,
             pendulum_terminate_angle_rad=math.radians(19.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=0.3,
             enable_external_wrench_push=False,
+            push_force_x_range=(0.0, 0.0),
+            push_force_y_range=(0.0, 0.0),
         ),
-        # Full goal range and full spawn angle. Introduce gentle pushes. Tighter termination.
         4: dict(
             goal_randomization_dist_min=0.2,
             goal_randomization_dist_max=0.5,
+            goal_randomization_angle_min=math.radians(-180),
+            goal_randomization_angle_max=math.radians(180),
             goal_yaw_randomization_min=math.radians(-45),
             goal_yaw_randomization_max=math.radians(45),
-            pendulum_angle_min=5.0,
-            pendulum_angle_max=math.radians(9.9),
-            pendulum_joint_limit_min_rad=math.radians(-10.0),
-            pendulum_joint_limit_max_rad=math.radians(10.0),
+            pendulum_angle_min=math.radians(10.0),
+            pendulum_angle_max=math.radians(19.9),
+            pendulum_joint_limit_min_rad=math.radians(-20.0),
+            pendulum_joint_limit_max_rad=math.radians(20.0),
             termination_grace_s=0.1,
-            pendulum_termination_grace_s=3.0,
+            pendulum_termination_grace_s=0.1,
             base_height_terminate_duration_s=10.0,
             pendulum_terminate_angle_rad=math.radians(19.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=0.2,
-            enable_external_wrench_push=False,
+            enable_external_wrench_push=True,
             push_force_x_range=(-5.0, 5.0),
             push_force_y_range=(-5.0, 5.0),
         ),
-        # Full difficulty. Stronger pushes and tightest termination.
         5: dict(
             goal_randomization_dist_min=0.3,
             goal_randomization_dist_max=0.5,
+            goal_randomization_angle_min=math.radians(-180),
+            goal_randomization_angle_max=math.radians(180),
             goal_yaw_randomization_min=math.radians(-60),
             goal_yaw_randomization_max=math.radians(60),
-            pendulum_angle_min=9.8,
-            pendulum_angle_max=math.radians(9.9),
-            pendulum_joint_limit_min_rad=math.radians(-10.0),
-            pendulum_joint_limit_max_rad=math.radians(10.0),
+            pendulum_angle_min=math.radians(19.8),
+            pendulum_angle_max=math.radians(19.9),
+            pendulum_joint_limit_min_rad=math.radians(-20.0),
+            pendulum_joint_limit_max_rad=math.radians(20.0),
             termination_grace_s=0.1,
-            pendulum_termination_grace_s=3.0,
+            pendulum_termination_grace_s=0.1,
             base_height_terminate_duration_s=10.0,
             pendulum_terminate_angle_rad=math.radians(19.0),
             pendulum_terminate_duration_s=0.5,
             position_tolerance=0.2,
             enable_external_wrench_push=False,
-            push_force_x_range=(-10.0, 10.0),
-            push_force_y_range=(-10.0, 10.0),
+            push_force_x_range=(0.0, 0.0),
+            push_force_y_range=(0.0, 0.0),
         ),
     }
 
@@ -215,7 +226,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
         leg_default_joint_pos = self.robot.data.default_joint_pos[:, self._leg_dof_ids]
 
-        # Joint position command from the latest policy action offsets relative to default joint positions.
+        # Joint position command from the latest delayed policy action offsets relative to default joint positions.
         self.last_action = torch.zeros(self.num_envs, self._action_dim, device=self.device)
         self.desired_joint_pos = leg_default_joint_pos.clone()
 
@@ -241,13 +252,15 @@ class Go2PendulumEnv(DirectRLEnv):
             "pendulum_velocity",
             "balanced_movement",
             "action_magnitude",
-            "rew_action_rate",
-            "torque",
+            "action_rate_l2",
+            "action_acc_l2",
+            "torque_l2",
+            "torque_rate_l2",
             "orient",
             "base_height",
             "lin_vel_z",
             "dof_vel",
-            "dof_acc",
+            "joint_acc_l2",
             "ang_vel_xy",
             "feet_clearance",
             "feet_air_time",
@@ -276,6 +289,7 @@ class Go2PendulumEnv(DirectRLEnv):
             device=self.device,
             requires_grad=False,
         )
+        self._prev_torque = torch.zeros(self.num_envs, self._action_dim, dtype=torch.float, device=self.device)
 
         # Get specific body indices.
         self._base_id, _ = self._contact_sensor.find_bodies("base")
@@ -417,6 +431,11 @@ class Go2PendulumEnv(DirectRLEnv):
         self._validate_range("com_offset_z_range", self.cfg.com_offset_z_range)
         self._validate_range("motor_stiffness_scale_range", self.cfg.motor_stiffness_scale_range)
         self._validate_range("motor_damping_scale_range", self.cfg.motor_damping_scale_range)
+        self._validate_range("motor_strength_range", self.cfg.motor_strength_range)
+        self._validate_range("kp_scale_range", self.cfg.kp_scale_range)
+        self._validate_range("kd_scale_range", self.cfg.kd_scale_range)
+        self._validate_range("effort_limit_scale_range", self.cfg.effort_limit_scale_range)
+        self._validate_range("torque_response_tau_s_range", self.cfg.torque_response_tau_s_range)
         if self.cfg.motor_stiffness_scale_range[0] <= 0.0:
             raise ValueError(
                 f"motor_stiffness_scale_range min must be > 0. Got {self.cfg.motor_stiffness_scale_range[0]}."
@@ -425,6 +444,21 @@ class Go2PendulumEnv(DirectRLEnv):
             raise ValueError(
                 f"motor_damping_scale_range min must be > 0. Got {self.cfg.motor_damping_scale_range[0]}."
             )
+        for name in ("motor_strength_range", "kp_scale_range", "kd_scale_range", "effort_limit_scale_range"):
+            if getattr(self.cfg, name)[0] <= 0.0:
+                raise ValueError(f"{name} min must be > 0. Got {getattr(self.cfg, name)[0]}.")
+        if self.cfg.torque_response_tau_s_range[0] < 0.0:
+            raise ValueError(
+                "torque_response_tau_s_range min must be >= 0. "
+                f"Got {self.cfg.torque_response_tau_s_range[0]}."
+            )
+        self._validate_step_range("action_delay_steps_range", self.cfg.action_delay_steps_range)
+        self._validate_step_range("proprio_delay_steps_range", self.cfg.proprio_delay_steps_range)
+        self._validate_step_range("base_lin_vel_delay_steps_range", self.cfg.base_lin_vel_delay_steps_range)
+        self._validate_step_range("pendulum_delay_steps_range", self.cfg.pendulum_delay_steps_range)
+        self._validate_probability("action_hold_prob", self.cfg.action_hold_prob)
+        self._validate_probability("proprio_obs_hold_prob", self.cfg.proprio_obs_hold_prob)
+        self._validate_probability("pendulum_obs_hold_prob", self.cfg.pendulum_obs_hold_prob)
         self._validate_range("push_interval_s", (self.cfg.push_interval_s_min, self.cfg.push_interval_s_max))
         self._validate_range("push_duration_s", (self.cfg.push_duration_s_min, self.cfg.push_duration_s_max))
         self._validate_range("push_force_x_range", self.cfg.push_force_x_range)
@@ -439,6 +473,18 @@ class Go2PendulumEnv(DirectRLEnv):
         if value_range[1] < value_range[0]:
             raise ValueError(f"{name} max must be >= min. Got {value_range[1]} < {value_range[0]}.")
 
+    @staticmethod
+    def _validate_step_range(name: str, value_range: tuple[int, int]) -> None:
+        if value_range[0] < 0 or value_range[1] < 0:
+            raise ValueError(f"{name} values must be >= 0. Got {value_range}.")
+        if value_range[1] < value_range[0]:
+            raise ValueError(f"{name} max must be >= min. Got {value_range[1]} < {value_range[0]}.")
+
+    @staticmethod
+    def _validate_probability(name: str, value: float) -> None:
+        if value < 0.0 or value > 1.0:
+            raise ValueError(f"{name} must be in [0, 1]. Got {value}.")
+
     def _sample_uniform_cpu(self, value_range: tuple[float, float], shape: tuple[int, ...]) -> torch.Tensor:
         low, high = value_range
         if high == low:
@@ -447,6 +493,17 @@ class Go2PendulumEnv(DirectRLEnv):
 
     def _sample_uniform_device(self, value_range: tuple[float, float], shape: tuple[int, ...], device: str) -> torch.Tensor:
         return self._sample_uniform_cpu(value_range, shape).to(device=device)
+
+    def _sample_uniform_noise(self, value: float, shape: tuple[int, ...], dtype: torch.dtype) -> torch.Tensor:
+        if value <= 0.0:
+            return torch.zeros(shape, device=self.device, dtype=dtype)
+        return sample_uniform(-value, value, shape, self.device).to(dtype=dtype)
+
+    def _sample_delay_steps(self, value_range: tuple[int, int], shape: tuple[int, ...], device: str) -> torch.Tensor:
+        low, high = value_range
+        if high == low:
+            return torch.full(shape, int(low), dtype=torch.long, device=device)
+        return torch.randint(int(low), int(high) + 1, shape, dtype=torch.long, device=device)
 
     def _seconds_to_steps(self, seconds: float) -> int:
         return max(1, math.ceil(seconds / self.step_dt))
@@ -471,7 +528,14 @@ class Go2PendulumEnv(DirectRLEnv):
         self._motor_actuator = None
         self._motor_default_stiffness = None
         self._motor_default_damping = None
+        self._motor_default_effort_limit = None
+        self._motor_default_saturation_effort = None
         self._motor_num_joints = 0
+        self._pd_stiffness = torch.full((self.num_envs, self._action_dim), 25.0, device=self.device)
+        self._pd_damping = torch.full((self.num_envs, self._action_dim), 0.6, device=self.device)
+        self._motor_strength = torch.ones((self.num_envs, self._action_dim), device=self.device)
+        self._randomized_effort_limit = torch.full((self.num_envs, self._action_dim), 23.5, device=self.device)
+        self._lagged_torque = torch.zeros((self.num_envs, self._action_dim), device=self.device)
         if self.cfg.enable_domain_randomization and self.cfg.enable_motor_gain_randomization:
             if self.cfg.motor_gain_actuator_name not in self.robot.actuators:
                 raise RuntimeError(
@@ -481,11 +545,72 @@ class Go2PendulumEnv(DirectRLEnv):
             self._motor_actuator = self.robot.actuators[self.cfg.motor_gain_actuator_name]
             self._motor_default_stiffness = self._motor_actuator.stiffness.clone()
             self._motor_default_damping = self._motor_actuator.damping.clone()
+            self._motor_default_effort_limit = self._motor_actuator.effort_limit.clone()
+            if hasattr(self._motor_actuator, "_saturation_effort"):
+                saturation_effort = self._motor_actuator._saturation_effort
+                if torch.is_tensor(saturation_effort):
+                    self._motor_default_saturation_effort = saturation_effort.clone()
+                else:
+                    self._motor_default_saturation_effort = torch.full_like(
+                        self._motor_default_effort_limit,
+                        float(saturation_effort),
+                    )
             self._motor_num_joints = self._motor_default_stiffness.shape[1]
+            self._pd_stiffness[:] = self._motor_default_stiffness
+            self._pd_damping[:] = self._motor_default_damping
+            self._randomized_effort_limit[:] = self._motor_default_effort_limit
+            self._motor_actuator.stiffness[:] = 0.0
+            self._motor_actuator.damping[:] = 0.0
 
-        # Sensor bias / drift state. Legacy linear-velocity and projected-gravity
-        # buffers remain allocated for compatibility with older configs, but the
-        # estimator-aligned actor observation no longer consumes them.
+        # Per-episode delay, hold, and command-response state.
+        max_action_delay = int(self.cfg.action_delay_steps_range[1])
+        max_proprio_delay = int(self.cfg.proprio_delay_steps_range[1])
+        max_base_lin_vel_delay = int(self.cfg.base_lin_vel_delay_steps_range[1])
+        max_pendulum_delay = int(self.cfg.pendulum_delay_steps_range[1])
+        proprio_dim = 2 * self._action_dim
+        pendulum_dim = 2 * self._pendulum_dof_count
+        imu_dim = 6
+        self._action_delay_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self._proprio_delay_steps = torch.zeros_like(self._action_delay_steps)
+        self._base_lin_vel_delay_steps = torch.zeros_like(self._action_delay_steps)
+        self._pendulum_delay_steps = torch.zeros_like(self._action_delay_steps)
+        self._action_delay_history = torch.zeros(
+            self.num_envs,
+            self._action_dim,
+            max_action_delay + 1,
+            device=self.device,
+        )
+        self._proprio_delay_history = torch.zeros(
+            self.num_envs,
+            proprio_dim,
+            max_proprio_delay + 1,
+            device=self.device,
+        )
+        self._base_lin_vel_delay_history = torch.zeros(
+            self.num_envs,
+            3,
+            max_base_lin_vel_delay + 1,
+            device=self.device,
+        )
+        self._pendulum_delay_history = torch.zeros(
+            self.num_envs,
+            pendulum_dim,
+            max_pendulum_delay + 1,
+            device=self.device,
+        )
+        self._imu_delay_history = torch.zeros(
+            self.num_envs,
+            imu_dim,
+            max_proprio_delay + 1,
+            device=self.device,
+        )
+        self._held_action_packet = torch.zeros(self.num_envs, self._action_dim, device=self.device)
+        self._delivered_proprio_obs = torch.zeros(self.num_envs, proprio_dim, device=self.device)
+        self._delivered_pendulum_obs = torch.zeros(self.num_envs, pendulum_dim, device=self.device)
+        self._delivered_imu_obs = torch.zeros(self.num_envs, imu_dim, device=self.device)
+        self._torque_response_tau_s = torch.zeros(self.num_envs, self._action_dim, device=self.device)
+
+        # Sensor bias / drift state.
         self._bias_body_lin_vel = torch.zeros((self.num_envs, 3), device=self.device)
         self._bias_body_ang_vel = torch.zeros((self.num_envs, 3), device=self.device)
         self._bias_projected_gravity = torch.zeros((self.num_envs, 3), device=self.device)
@@ -549,19 +674,60 @@ class Go2PendulumEnv(DirectRLEnv):
             return
         if self._motor_actuator is None:
             return
-        self._motor_actuator.stiffness[env_ids] = self._motor_default_stiffness[env_ids]
-        self._motor_actuator.damping[env_ids] = self._motor_default_damping[env_ids]
         num_envs = env_ids.numel()
         if num_envs == 0:
             return
-        if self.cfg.motor_gain_per_joint:
-            gain_shape = (num_envs, self._motor_num_joints)
-        else:
-            gain_shape = (num_envs, 1)
-        stiffness_scale = self._sample_uniform_device(self.cfg.motor_stiffness_scale_range, gain_shape, self.device)
-        damping_scale = self._sample_uniform_device(self.cfg.motor_damping_scale_range, gain_shape, self.device)
-        self._motor_actuator.stiffness[env_ids] *= stiffness_scale
-        self._motor_actuator.damping[env_ids] *= damping_scale
+        gain_shape = (num_envs, self._motor_num_joints) if self.cfg.motor_gain_per_joint else (num_envs, 1)
+        stiffness_scale = self._sample_uniform_device(self.cfg.kp_scale_range, gain_shape, self.device)
+        damping_scale = self._sample_uniform_device(self.cfg.kd_scale_range, gain_shape, self.device)
+        motor_strength = self._sample_uniform_device(self.cfg.motor_strength_range, gain_shape, self.device)
+        effort_limit_scale = self._sample_uniform_device(self.cfg.effort_limit_scale_range, gain_shape, self.device)
+        self._pd_stiffness[env_ids] = self._motor_default_stiffness[env_ids] * stiffness_scale
+        self._pd_damping[env_ids] = self._motor_default_damping[env_ids] * damping_scale
+        self._motor_strength[env_ids] = torch.ones_like(self._motor_strength[env_ids]) * motor_strength
+        self._randomized_effort_limit[env_ids] = self._motor_default_effort_limit[env_ids] * effort_limit_scale
+        self._motor_actuator.stiffness[env_ids] = 0.0
+        self._motor_actuator.damping[env_ids] = 0.0
+        self._motor_actuator.effort_limit[env_ids] = self._randomized_effort_limit[env_ids]
+        if self._motor_default_saturation_effort is not None and hasattr(self._motor_actuator, "_saturation_effort"):
+            current_saturation_effort = self._motor_actuator._saturation_effort
+            if torch.is_tensor(current_saturation_effort):
+                saturation_effort = current_saturation_effort.clone()
+            else:
+                saturation_effort = self._motor_default_saturation_effort.clone()
+            saturation_effort[env_ids] = self._motor_default_saturation_effort[env_ids] * effort_limit_scale
+            self._motor_actuator._saturation_effort = saturation_effort
+            if hasattr(self._motor_actuator, "_vel_at_effort_lim"):
+                self._motor_actuator._vel_at_effort_lim = self._motor_actuator.velocity_limit * (
+                    1.0 + self._motor_actuator.effort_limit / self._motor_actuator._saturation_effort
+                )
+
+    def _sample_transport_randomization(self, env_ids: torch.Tensor) -> None:
+        if env_ids.numel() == 0:
+            return
+        if not self.cfg.enable_domain_randomization:
+            self._action_delay_steps[env_ids] = 0
+            self._proprio_delay_steps[env_ids] = 0
+            self._base_lin_vel_delay_steps[env_ids] = 0
+            self._pendulum_delay_steps[env_ids] = 0
+            self._torque_response_tau_s[env_ids] = 0.0
+            return
+        num_envs = env_ids.numel()
+        self._action_delay_steps[env_ids] = self._sample_delay_steps(
+            self.cfg.action_delay_steps_range, (num_envs,), self.device
+        )
+        self._proprio_delay_steps[env_ids] = self._sample_delay_steps(
+            self.cfg.proprio_delay_steps_range, (num_envs,), self.device
+        )
+        self._base_lin_vel_delay_steps[env_ids] = self._sample_delay_steps(
+            self.cfg.base_lin_vel_delay_steps_range, (num_envs,), self.device
+        )
+        self._pendulum_delay_steps[env_ids] = self._sample_delay_steps(
+            self.cfg.pendulum_delay_steps_range, (num_envs,), self.device
+        )
+        self._torque_response_tau_s[env_ids] = self._sample_uniform_device(
+            self.cfg.torque_response_tau_s_range, (num_envs, self._action_dim), self.device
+        )
 
     def _sample_sensor_biases(self, env_ids: torch.Tensor) -> None:
         if not (self.cfg.enable_domain_randomization and self.cfg.enable_sensor_bias_drift):
@@ -569,29 +735,31 @@ class Go2PendulumEnv(DirectRLEnv):
         num_envs = env_ids.numel()
         if num_envs == 0:
             return
-        self._bias_body_lin_vel[env_ids] = 0.0
+        self._bias_body_lin_vel[env_ids] = self._sample_uniform_device(
+            (-self.cfg.base_lin_vel_bias_m_s, self.cfg.base_lin_vel_bias_m_s), (num_envs, 3), self.device
+        )
         self._bias_body_ang_vel[env_ids] = self._sample_uniform_device(
-            (-self.cfg.imu_ang_vel_bias_range, self.cfg.imu_ang_vel_bias_range), (num_envs, 3), self.device
+            (-self.cfg.base_ang_vel_bias_rad_s, self.cfg.base_ang_vel_bias_rad_s), (num_envs, 3), self.device
         )
         self._bias_projected_gravity[env_ids] = 0.0
         self._bias_leg_joint_pos[env_ids] = self._sample_uniform_device(
-            (-self.cfg.encoder_joint_pos_bias_range, self.cfg.encoder_joint_pos_bias_range),
+            (-self.cfg.joint_pos_bias_rad, self.cfg.joint_pos_bias_rad),
             (num_envs, self._action_dim),
             self.device,
         )
         self._bias_leg_joint_vel[env_ids] = self._sample_uniform_device(
-            (-self.cfg.encoder_joint_vel_bias_range, self.cfg.encoder_joint_vel_bias_range),
+            (-self.cfg.joint_vel_bias_rad_s, self.cfg.joint_vel_bias_rad_s),
             (num_envs, self._action_dim),
             self.device,
         )
         if self._pendulum_dof_count > 0:
             self._bias_pendulum_joint_pos[env_ids] = self._sample_uniform_device(
-                (-self.cfg.encoder_pendulum_pos_bias_range, self.cfg.encoder_pendulum_pos_bias_range),
+                (-self.cfg.pendulum_pos_bias_rad, self.cfg.pendulum_pos_bias_rad),
                 (num_envs, self._pendulum_dof_count),
                 self.device,
             )
             self._bias_pendulum_joint_vel[env_ids] = self._sample_uniform_device(
-                (-self.cfg.encoder_pendulum_vel_bias_range, self.cfg.encoder_pendulum_vel_bias_range),
+                (-self.cfg.pendulum_vel_bias_rad_s, self.cfg.pendulum_vel_bias_rad_s),
                 (num_envs, self._pendulum_dof_count),
                 self.device,
             )
@@ -637,6 +805,44 @@ class Go2PendulumEnv(DirectRLEnv):
                 -self.cfg.encoder_pendulum_vel_bias_range,
                 self.cfg.encoder_pendulum_vel_bias_range,
             )
+
+    def _insert_delay_sample(self, history: torch.Tensor, sample: torch.Tensor) -> None:
+        if history.shape[-1] > 1:
+            history[:, :, 1:] = history[:, :, :-1].clone()
+        history[:, :, 0] = sample
+
+    def _read_delay_sample(self, history: torch.Tensor, delay_steps: torch.Tensor) -> torch.Tensor:
+        env_ids = torch.arange(self.num_envs, device=self.device, dtype=torch.long)
+        return history[env_ids, :, delay_steps]
+
+    def _maybe_hold_packet(self, sample: torch.Tensor, previous_sample: torch.Tensor, hold_prob: float) -> torch.Tensor:
+        if not self.cfg.enable_domain_randomization or hold_prob <= 0.0:
+            return sample
+        hold_mask = torch.rand((self.num_envs, 1), device=self.device) < hold_prob
+        return torch.where(hold_mask, previous_sample, sample)
+
+    def _reset_transport_buffers(
+        self,
+        env_ids: torch.Tensor,
+        leg_joint_pos: torch.Tensor,
+        leg_joint_vel: torch.Tensor,
+        pendulum_joint_pos: torch.Tensor,
+        pendulum_joint_vel: torch.Tensor,
+        imu_packet: torch.Tensor,
+    ) -> None:
+        self._sample_transport_randomization(env_ids)
+        self._action_delay_history[env_ids] = 0.0
+        self._held_action_packet[env_ids] = 0.0
+        proprio_sample = torch.cat([leg_joint_pos, leg_joint_vel], dim=-1)
+        self._proprio_delay_history[env_ids] = proprio_sample.unsqueeze(-1)
+        self._delivered_proprio_obs[env_ids] = proprio_sample
+        if self._pendulum_dof_count > 0:
+            pendulum_sample = torch.cat([pendulum_joint_pos, pendulum_joint_vel], dim=-1)
+            self._pendulum_delay_history[env_ids] = pendulum_sample.unsqueeze(-1)
+            self._delivered_pendulum_obs[env_ids] = pendulum_sample
+        self._imu_delay_history[env_ids] = imu_packet.unsqueeze(-1)
+        self._delivered_imu_obs[env_ids] = imu_packet
+        self._base_lin_vel_delay_history[env_ids] = 0.0
 
     def _schedule_next_push(self, env_ids: torch.Tensor, now_step: torch.Tensor) -> None:
         if not (self.cfg.enable_domain_randomization and self.cfg.enable_external_wrench_push):
@@ -713,16 +919,32 @@ class Go2PendulumEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self._update_external_wrench_pushes()
-        self.last_action = actions.clone()
+        action_packet = actions.clone()
+        action_packet = self._maybe_hold_packet(action_packet, self._held_action_packet, self.cfg.action_hold_prob)
+        self._held_action_packet = action_packet.clone()
+        self._insert_delay_sample(self._action_delay_history, action_packet)
+        self.last_action = self._read_delay_sample(self._action_delay_history, self._action_delay_steps).clone()
         self.desired_joint_pos = self.robot.data.default_joint_pos[:, self._leg_dof_ids] + (
             self.cfg.action_scale * self.last_action
         )
 
     def _apply_action(self) -> None:
-        self.robot.set_joint_position_target(
-            self.desired_joint_pos,
-            joint_ids=self._leg_dof_ids,
+        q = self.robot.data.joint_pos[:, self._leg_dof_ids]
+        dq = self.robot.data.joint_vel[:, self._leg_dof_ids]
+        desired_torque = self._motor_strength * (
+            self._pd_stiffness * (self.desired_joint_pos - q) - self._pd_damping * dq
         )
+        tau = self._torque_response_tau_s
+        alpha = torch.where(
+            tau > 0.0,
+            1.0 - torch.exp(-self.physics_dt / tau),
+            torch.ones_like(tau),
+        )
+        self._lagged_torque += alpha * (desired_torque - self._lagged_torque)
+        torque = torch.clamp(self._lagged_torque, -self._randomized_effort_limit, self._randomized_effort_limit)
+        self.robot.set_joint_position_target(q, joint_ids=self._leg_dof_ids)
+        self.robot.set_joint_velocity_target(dq, joint_ids=self._leg_dof_ids)
+        self.robot.set_joint_effort_target(torque, joint_ids=self._leg_dof_ids)
 
     def _update_curriculum(self) -> None:
         """Update difficulty level based on training progress."""
@@ -805,77 +1027,97 @@ class Go2PendulumEnv(DirectRLEnv):
         critic_pendulum_joint_pos = pendulum_joint_pos_raw.clone()
         critic_pendulum_joint_vel = pendulum_joint_vel_raw.clone()
 
-        # Actor (noisy) quantities — start from ground truth, apply noise.
-        actor_body_lin_vel_b = critic_body_lin_vel_b.clone()
-        actor_body_ang_vel_b = critic_body_ang_vel_b.clone()
-        actor_projected_gravity_b = critic_projected_gravity_b.clone()
-        actor_leg_joint_pos = leg_joint_pos_raw.clone()
-        actor_leg_joint_vel = leg_joint_vel_raw.clone()
-        actor_pendulum_joint_pos = pendulum_joint_pos_raw.clone()
-        actor_pendulum_joint_vel = pendulum_joint_vel_raw.clone()
-        actor_imu_orientation_noise = self._sample_orientation_noise_quat(
-            self.num_envs,
-            imu_quat_w.dtype,
-            self.cfg.imu_orientation_noise_std_rad,
-            self.cfg.imu_orientation_noise_std_rad,
-            0.0,
-        )
-        actor_imu_quat_w = math_utils.quat_mul(actor_imu_orientation_noise, imu_quat_w)
-        actor_projected_gravity_b = math_utils.quat_apply_inverse(actor_imu_quat_w, self._world_gravity_dir)
-        actor_base_pos_w, actor_base_quat_w = self._sample_noisy_pose(
-            base_pos_w,
-            base_quat_w,
-            self.cfg.vicon_pos_noise_std_m,
-            self.cfg.vicon_orientation_noise_std_rad,
-        )
-        actor_base_lin_vel_w = (actor_base_pos_w - self._prev_vicon_base_pos_w) / self.step_dt
-        self._prev_vicon_base_pos_w.copy_(actor_base_pos_w)
-        actor_body_lin_vel_b = math_utils.quat_apply_inverse(actor_base_quat_w, actor_base_lin_vel_w)
-        actor_base_pos_xy = actor_base_pos_w[:, :2] - env_origins[:, :2]
-        _, _, actor_base_yaw = math_utils.euler_xyz_from_quat(actor_base_quat_w)
-        actor_position_error_xy, actor_yaw_error = self._compute_goal_error_terms(
-            actor_base_pos_xy, actor_base_yaw, target_xy, target_yaw
-        )
-
-        # Apply sensor bias/drift (if DR enabled).
+        # Actor quantities use delayed/noisy transport blocks. The critic stays clean.
         self._update_sensor_bias_drift()
+        self._insert_delay_sample(self._base_lin_vel_delay_history, critic_body_lin_vel_b)
+        actor_body_lin_vel_b = self._read_delay_sample(
+            self._base_lin_vel_delay_history,
+            self._base_lin_vel_delay_steps,
+        ).clone()
+        proprio_clean = torch.cat([critic_leg_joint_pos, critic_leg_joint_vel], dim=-1)
+        self._insert_delay_sample(self._proprio_delay_history, proprio_clean)
+        actor_proprio = self._read_delay_sample(self._proprio_delay_history, self._proprio_delay_steps).clone()
+        pendulum_clean = torch.cat([critic_pendulum_joint_pos, critic_pendulum_joint_vel], dim=-1)
+        self._insert_delay_sample(self._pendulum_delay_history, pendulum_clean)
+        actor_pendulum = self._read_delay_sample(self._pendulum_delay_history, self._pendulum_delay_steps).clone()
+        imu_clean = torch.cat([critic_body_ang_vel_b, critic_projected_gravity_b], dim=-1)
+        self._insert_delay_sample(self._imu_delay_history, imu_clean)
+        actor_imu = self._read_delay_sample(self._imu_delay_history, self._proprio_delay_steps).clone()
+        actor_imu = self._maybe_hold_packet(
+            actor_imu,
+            self._delivered_imu_obs,
+            self.cfg.proprio_obs_hold_prob,
+        )
+        self._delivered_imu_obs = actor_imu.clone()
+
+        actor_body_ang_vel_b = actor_imu[:, :3]
+        actor_projected_gravity_b = actor_imu[:, 3:]
         if self.cfg.enable_domain_randomization and self.cfg.enable_sensor_bias_drift:
+            actor_body_lin_vel_b = actor_body_lin_vel_b + self._bias_body_lin_vel
             actor_body_ang_vel_b = actor_body_ang_vel_b + self._bias_body_ang_vel
-            actor_leg_joint_pos = actor_leg_joint_pos + self._bias_leg_joint_pos
-            actor_leg_joint_vel = actor_leg_joint_vel + self._bias_leg_joint_vel
+            actor_projected_gravity_b = actor_projected_gravity_b + self._bias_projected_gravity
+            actor_proprio[:, : self._action_dim] += self._bias_leg_joint_pos
+            actor_proprio[:, self._action_dim :] += self._bias_leg_joint_vel
             if self._pendulum_dof_count > 0:
-                actor_pendulum_joint_pos = actor_pendulum_joint_pos + self._bias_pendulum_joint_pos
-                actor_pendulum_joint_vel = actor_pendulum_joint_vel + self._bias_pendulum_joint_vel
+                actor_pendulum[:, : self._pendulum_dof_count] += self._bias_pendulum_joint_pos
+                actor_pendulum[:, self._pendulum_dof_count :] += self._bias_pendulum_joint_vel
 
-        # Apply fixed-magnitude observation noise.
-        body_ang_vel_noise = self.cfg.body_ang_vel_noise
-        pendulum_joint_pos_noise = self.cfg.pendulum_joint_pos_noise
-        pendulum_joint_vel_noise = self.cfg.pendulum_joint_vel_noise
-
-        if body_ang_vel_noise > 0.0:
-            actor_body_ang_vel_b = actor_body_ang_vel_b + sample_uniform(
-                -body_ang_vel_noise,
-                body_ang_vel_noise,
-                actor_body_ang_vel_b.shape,
-                actor_body_ang_vel_b.device,
+        if self.cfg.enable_domain_randomization:
+            actor_body_lin_vel_b += self._sample_uniform_noise(
+                self.cfg.base_lin_vel_noise_m_s,
+                actor_body_lin_vel_b.shape,
+                actor_body_lin_vel_b.dtype,
             )
-        if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
-            if pendulum_joint_pos_noise > 0.0:
-                actor_pendulum_joint_pos = actor_pendulum_joint_pos + sample_uniform(
-                    -pendulum_joint_pos_noise,
-                    pendulum_joint_pos_noise,
-                    actor_pendulum_joint_pos.shape,
-                    actor_pendulum_joint_pos.device,
+            actor_body_ang_vel_b += self._sample_uniform_noise(
+                self.cfg.base_ang_vel_noise_rad_s,
+                actor_body_ang_vel_b.shape,
+                actor_body_ang_vel_b.dtype,
+            )
+            actor_projected_gravity_b += self._sample_uniform_noise(
+                self.cfg.projected_gravity_component_noise,
+                actor_projected_gravity_b.shape,
+                actor_projected_gravity_b.dtype,
+            )
+            actor_proprio[:, : self._action_dim] += self._sample_uniform_noise(
+                self.cfg.joint_pos_noise_rad,
+                (self.num_envs, self._action_dim),
+                actor_proprio.dtype,
+            )
+            actor_proprio[:, self._action_dim :] += self._sample_uniform_noise(
+                self.cfg.joint_vel_noise_rad_s,
+                (self.num_envs, self._action_dim),
+                actor_proprio.dtype,
+            )
+            if self._pendulum_dof_count > 0:
+                actor_pendulum[:, : self._pendulum_dof_count] += self._sample_uniform_noise(
+                    self.cfg.pendulum_pos_noise_rad,
+                    (self.num_envs, self._pendulum_dof_count),
+                    actor_pendulum.dtype,
                 )
-            if pendulum_joint_vel_noise > 0.0:
-                actor_pendulum_joint_vel = actor_pendulum_joint_vel + sample_uniform(
-                    -pendulum_joint_vel_noise,
-                    pendulum_joint_vel_noise,
-                    actor_pendulum_joint_vel.shape,
-                    actor_pendulum_joint_vel.device,
+                actor_pendulum[:, self._pendulum_dof_count :] += self._sample_uniform_noise(
+                    self.cfg.pendulum_vel_noise_rad_s,
+                    (self.num_envs, self._pendulum_dof_count),
+                    actor_pendulum.dtype,
                 )
 
-        actor_state_error = torch.cat([actor_position_error_xy, actor_yaw_error.unsqueeze(-1)], dim=-1)
+        actor_proprio = self._maybe_hold_packet(
+            actor_proprio,
+            self._delivered_proprio_obs,
+            self.cfg.proprio_obs_hold_prob,
+        )
+        self._delivered_proprio_obs = actor_proprio.clone()
+        actor_leg_joint_pos = actor_proprio[:, : self._action_dim]
+        actor_leg_joint_vel = actor_proprio[:, self._action_dim :]
+
+        actor_pendulum = self._maybe_hold_packet(
+            actor_pendulum,
+            self._delivered_pendulum_obs,
+            self.cfg.pendulum_obs_hold_prob,
+        )
+        self._delivered_pendulum_obs = actor_pendulum.clone()
+        actor_pendulum_joint_pos = actor_pendulum[:, : self._pendulum_dof_count]
+        actor_pendulum_joint_vel = actor_pendulum[:, self._pendulum_dof_count :]
+        actor_state_error = critic_state_error.clone()
 
         # Policy obs (actor — potentially noisy).
         policy_obs = torch.cat(
@@ -955,7 +1197,7 @@ class Go2PendulumEnv(DirectRLEnv):
             dim=1,
         ) * (self.cfg.action_scale**2)
 
-        rew_action_rate += torch.sum(
+        rew_action_acc = torch.sum(
             torch.square(self.last_action - 2 * self._action_history[:, :, 0] + self._action_history[:, :, 1]),
             dim=1,
         ) * (self.cfg.action_scale**2)
@@ -1018,8 +1260,11 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_pendulum_speed_deg_s_sum += pendulum_speed_deg_s
         self._episode_pendulum_speed_deg_s_count += 1
 
-        # penalize high torques from the actuator model
-        rew_torque = torch.sum(torch.square(self.robot.data.applied_torque[:, self._leg_dof_ids]), dim=1)
+        # penalize high torques and torque-rate from the actuator model
+        current_torque = self.robot.data.applied_torque[:, self._leg_dof_ids]
+        rew_torque = torch.sum(torch.square(current_torque), dim=1)
+        rew_torque_rate = torch.sum(torch.square(current_torque - self._prev_torque), dim=1)
+        self._prev_torque = current_torque.clone()
 
         self._action_history = torch.roll(self._action_history, 1, 2)
         self._action_history[:, :, 0] = self.last_action[:]
@@ -1071,13 +1316,15 @@ class Go2PendulumEnv(DirectRLEnv):
             "pendulum_velocity": pendulum_velocity_reward * self.cfg.pendulum_vel_reward_scale,
             "balanced_movement": balanced_movement_reward * self.cfg.balanced_movement_reward_scale,
             "action_magnitude": rew_action_magnitude * self.cfg.action_magnitude_reward_scale,
-            "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,
-            "torque": rew_torque * self.cfg.torque_reward_scale,
+            "action_rate_l2": rew_action_rate * self.cfg.action_rate_reward_scale,
+            "action_acc_l2": rew_action_acc * self.cfg.action_acc_reward_scale,
+            "torque_l2": rew_torque * self.cfg.torque_reward_scale,
+            "torque_rate_l2": rew_torque_rate * self.cfg.torque_rate_reward_scale,
             "orient": rew_orient * self.cfg.orient_reward_scale,
             "base_height": base_height_reward * self.cfg.base_height_reward_scale,
             "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
             "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,
-            "dof_acc": rew_dof_acc * self.cfg.dof_acc_reward_scale,
+            "joint_acc_l2": rew_dof_acc * self.cfg.dof_acc_reward_scale,
             "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,
             "feet_clearance": rew_feet_clearance * self.cfg.feet_clearance_reward_scale,
             "feet_air_time": rew_feet_air_time * self.cfg.feet_air_time_reward_scale,
@@ -1207,6 +1454,7 @@ class Go2PendulumEnv(DirectRLEnv):
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
 
         self.last_action[env_ids] = 0.0
+        self._prev_torque[env_ids] = 0.0
         self._steps_since_reset[env_ids] = 0
 
         if self.cfg.enable_domain_randomization:
@@ -1260,17 +1508,48 @@ class Go2PendulumEnv(DirectRLEnv):
         joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
         joint_vel = self.robot.data.default_joint_vel[env_ids].clone()
         self.desired_joint_pos[env_ids] = joint_pos[:, self._leg_dof_ids]
+        self._lagged_torque[env_ids] = 0.0
 
         if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
-            for joint_idx in self._pendulum_dof_ids.tolist():
-                signs = torch.randint(0, 2, joint_pos[:, joint_idx].shape, device=joint_pos.device) * 2 - 1
-                magnitudes = sample_uniform(
-                    self.cfg.pendulum_angle_min,
-                    self.cfg.pendulum_angle_max,
-                    joint_pos[:, joint_idx].shape,
-                    joint_pos.device,
+            if self._pendulum_dof_ids.numel() != 2:
+                raise RuntimeError(
+                    f"Radial pendulum reset expects exactly two joints, got {self._pendulum_dof_ids.numel()}."
                 )
-                joint_pos[:, joint_idx] += signs.float() * magnitudes
+            radius = sample_uniform(
+                self.cfg.pendulum_angle_min,
+                self.cfg.pendulum_angle_max,
+                (num_reset_envs,),
+                joint_pos.device,
+            )
+            theta = sample_uniform(0.0, 2.0 * math.pi, (num_reset_envs,), joint_pos.device)
+            offsets = torch.stack((radius * torch.cos(theta), radius * torch.sin(theta)), dim=-1)
+            joint_pos[:, self._pendulum_dof_ids] += offsets
+
+        reset_leg_joint_pos = joint_pos[:, self._leg_dof_ids] - self.robot.data.default_joint_pos[
+            env_ids[:, None], self._leg_dof_ids
+        ]
+        reset_leg_joint_vel = joint_vel[:, self._leg_dof_ids]
+        if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
+            reset_pendulum_joint_pos = joint_pos[:, self._pendulum_dof_ids]
+            reset_pendulum_joint_vel = joint_vel[:, self._pendulum_dof_ids]
+        else:
+            reset_pendulum_joint_pos = torch.zeros(
+                num_reset_envs,
+                self._pendulum_dof_count,
+                device=self.device,
+                dtype=joint_pos.dtype,
+            )
+            reset_pendulum_joint_vel = torch.zeros_like(reset_pendulum_joint_pos)
+        reset_imu_packet = torch.zeros(num_reset_envs, 6, device=self.device, dtype=joint_pos.dtype)
+        reset_imu_packet[:, 5] = -1.0
+        self._reset_transport_buffers(
+            env_ids,
+            reset_leg_joint_pos,
+            reset_leg_joint_vel,
+            reset_pendulum_joint_pos,
+            reset_pendulum_joint_vel,
+            reset_imu_packet,
+        )
 
         default_root_state = self.robot.data.default_root_state[env_ids].clone()
         default_root_state[:, :3] += self._terrain.env_origins[env_ids]

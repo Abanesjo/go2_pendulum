@@ -50,8 +50,8 @@
 # Notes:
 #   - The actor observation is the one used by the policy at inference time.
 #   - The actor observation includes the same kinds of effects used in training:
-#     sensor bias/drift and observation noise.
-#   - The "last action" term is the latest action command applied by the task.
+#     sensor bias/drift, observation noise, packet holds, and transport delay.
+#   - The "last action" term is the latest delayed action command applied by the task.
 #
 # Action layout:
 #   The policy outputs 12 floating-point values ordered as
@@ -63,8 +63,9 @@
 #
 # Action semantics:
 #   - These 12 values are joint-position offsets, not absolute joint targets.
-#   - There is no downstream filtering, delay, or clamping in the task.
-#   - The action is converted directly to desired joint positions:
+#   - With domain randomization enabled, the task may delay/hold action packets
+#     and lag the resulting torque command. There is no hard action clipping.
+#   - The delivered action is converted to desired joint positions:
 #
 #       q_des = q_default + action_scale * action
 #
@@ -148,6 +149,11 @@ GO2_DEFAULT_JOINT_POS = {
 
 GO2_DEFAULT_JOINT_VEL = {joint_name: 0.0 for joint_name in GO2_DEFAULT_JOINT_POS}
 
+LEG_ARMATURE = 0.01
+LEG_FRICTION = 0.05
+LEG_DYNAMIC_FRICTION = 0.05
+LEG_VISCOUS_FRICTION = 0.02
+
 GO2_PENDULUM_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
         usd_path=GO2_PENDULUM_USD_PATH,
@@ -181,7 +187,10 @@ GO2_PENDULUM_CFG = ArticulationCfg(
             velocity_limit=30.0,
             stiffness=25.0,
             damping=0.6,
-            friction=0.0,
+            armature=LEG_ARMATURE,
+            friction=LEG_FRICTION,
+            dynamic_friction=LEG_DYNAMIC_FRICTION,
+            viscous_friction=LEG_VISCOUS_FRICTION,
         ),
     },
 )
@@ -247,18 +256,39 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     position_terminate_duration_s = 15.0
     termination_penalty = -5.0
 
-    # --- Observation noise (applied to actor obs only at fixed max magnitude) ---
-    # TODO(human): Tune these noise magnitudes based on real sensor characteristics.
-    # Estimator-aligned actor channels:
-    #   - projected_gravity uses noisy IMU quaternion roll/pitch perturbations
-    #   - body_lin_vel and goal error use noisy Vicon/base-pose differencing
-    # The std values below are Gaussian standard deviations in native units.
+    # --- Actor observation/action transport randomization ---
+    # Delay ranges are sampled per environment at reset and are counted at the
+    # 50 Hz policy/environment step rate.
+    action_delay_steps_range = (0, 2)
+    proprio_delay_steps_range = (0, 1)
+    base_lin_vel_delay_steps_range = (0, 2)
+    pendulum_delay_steps_range = (0, 3)
+
+    # Packet holds repeat the previously delivered action/observation packet.
+    action_hold_prob = 0.01
+    proprio_obs_hold_prob = 0.005
+    pendulum_obs_hold_prob = 0.01
+
+    # Observation noise and reset-sampled bias magnitudes in raw units. Noise is
+    # uniform in [-value, value]; bias is sampled once per reset in the same range.
+    joint_pos_noise_rad = 0.017
+    joint_pos_bias_rad = 0.010
+    joint_vel_noise_rad_s = 0.50
+    joint_vel_bias_rad_s = 0.05
+    base_lin_vel_noise_m_s = 0.10
+    base_lin_vel_bias_m_s = 0.03
+    base_ang_vel_noise_rad_s = 0.25
+    base_ang_vel_bias_rad_s = 0.02
+    projected_gravity_component_noise = 0.025
+    pendulum_pos_noise_rad = 0.008
+    pendulum_pos_bias_rad = 0.005
+    pendulum_vel_noise_rad_s = 0.40
+    pendulum_vel_bias_rad_s = 0.05
+
+    # Deprecated/unused compatibility fields from earlier estimator-aligned DR.
     imu_orientation_noise_std_rad = math.radians(1.0)
     vicon_pos_noise_std_m = 0.001
     vicon_orientation_noise_std_rad = math.radians(0.5)
-
-    # Deprecated/unused after the estimator-aligned IMU/Vicon refactor. Kept for
-    # config compatibility, but no longer consumed by the environment.
     body_lin_vel_noise = 0.1
     body_ang_vel_noise = 0.2
     orientation_noise = 0.05
@@ -285,13 +315,15 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     tracking_contacts_shaped_force_reward_scale = 1.0
     feet_air_time_reward_scale = 0.1
     action_magnitude_reward_scale = -0.1
-    action_rate_reward_scale = -0.01
-    torque_reward_scale = -0.0001
+    action_rate_reward_scale = -0.02
+    action_acc_reward_scale = -0.02
+    torque_reward_scale = -0.0002
+    torque_rate_reward_scale = -1.0e-4
     orient_reward_scale = 0.8
     orient_reward_sigma = 0.05
     lin_vel_z_reward_scale = -2.0
     dof_vel_reward_scale = -0.003
-    dof_acc_reward_scale = -2.5e-7
+    dof_acc_reward_scale = -5.0e-7
     ang_vel_xy_reward_scale = -0.01
     undesired_contact_reward_scale = -1.0
     # Base-height shaping reward (separate from base-height termination above).
@@ -313,11 +345,16 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     com_offset_y_range = (-0.03, 0.03)
     com_offset_z_range = (-0.02, 0.05)
 
-    # Motor gain randomization.
+    # Motor/actuator randomization.
     enable_motor_gain_randomization = True
     motor_gain_actuator_name = "base_legs"
-    motor_stiffness_scale_range = (0.9, 1.1)
-    motor_damping_scale_range = (0.9, 1.1)
+    motor_strength_range = (0.8, 1.2)
+    kp_scale_range = (0.8, 1.3)
+    kd_scale_range = (0.5, 1.5)
+    effort_limit_scale_range = (0.7, 1.0)
+    torque_response_tau_s_range = (0.005, 0.020)
+    motor_stiffness_scale_range = kp_scale_range
+    motor_damping_scale_range = kd_scale_range
     motor_gain_per_joint = False
 
     # Sensor bias and drift randomization.
