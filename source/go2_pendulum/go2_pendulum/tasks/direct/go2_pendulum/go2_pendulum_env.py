@@ -285,6 +285,16 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_pendulum_angle_deg_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._episode_pendulum_speed_deg_s_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self._episode_pendulum_speed_deg_s_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        smoothness_metric_keys = [
+            "action_rms",
+            "action_rate_l2",
+            "action_acc_l2",
+            "torque_rate_l2",
+        ]
+        self._episode_smoothness_sums = {
+            key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device) for key in smoothness_metric_keys
+        }
+        self._episode_smoothness_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._prev_position_error = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
 
         self._action_history = torch.zeros(
@@ -1165,19 +1175,17 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_base_tilt_deg_sum += base_tilt_deg
         self._episode_base_tilt_deg_count += 1
 
-        rew_action_magnitude = torch.sum(
-            torch.square(self.last_action), dim=1
-        ) * (self.cfg.action_scale**2)
-
-        rew_action_rate = torch.sum(
-            torch.square(self.last_action - self._action_history[:, :, 0]),
-            dim=1,
-        ) * (self.cfg.action_scale**2)
-
-        rew_action_acc = torch.sum(
+        raw_action_magnitude = torch.sum(torch.square(self.last_action), dim=1)
+        raw_action_rate_l2 = torch.sum(torch.square(self.last_action - self._action_history[:, :, 0]), dim=1)
+        raw_action_acc_l2 = torch.sum(
             torch.square(self.last_action - 2 * self._action_history[:, :, 0] + self._action_history[:, :, 1]),
             dim=1,
-        ) * (self.cfg.action_scale**2)
+        )
+        raw_action_rms = torch.sqrt(torch.mean(torch.square(self.last_action), dim=1))
+
+        rew_action_magnitude = raw_action_magnitude * (self.cfg.action_scale**2)
+        rew_action_rate = raw_action_rate_l2 * (self.cfg.action_scale**2)
+        rew_action_acc = raw_action_acc_l2 * (self.cfg.action_scale**2)
 
         # penalize non-vertical orientation (projected gravity on xy plane)
         orient_error = torch.sum(
@@ -1240,8 +1248,15 @@ class Go2PendulumEnv(DirectRLEnv):
         # penalize high torques and torque-rate from the actuator model
         current_torque = self.robot.data.applied_torque[:, self._leg_dof_ids]
         rew_torque = torch.sum(torch.square(current_torque), dim=1)
-        rew_torque_rate = torch.sum(torch.square(current_torque - self._prev_torque), dim=1)
+        raw_torque_rate_l2 = torch.sum(torch.square(current_torque - self._prev_torque), dim=1)
+        rew_torque_rate = raw_torque_rate_l2
         self._prev_torque = current_torque.clone()
+
+        self._episode_smoothness_sums["action_rms"] += raw_action_rms
+        self._episode_smoothness_sums["action_rate_l2"] += raw_action_rate_l2
+        self._episode_smoothness_sums["action_acc_l2"] += raw_action_acc_l2
+        self._episode_smoothness_sums["torque_rate_l2"] += raw_torque_rate_l2
+        self._episode_smoothness_count += 1
 
         self._action_history = torch.roll(self._action_history, 1, 2)
         self._action_history[:, :, 0] = self.last_action[:]
@@ -1601,6 +1616,11 @@ class Go2PendulumEnv(DirectRLEnv):
         extras["Episode_Metric/mean_pendulum_speed_deg_s"] = mean_pendulum_speed_deg_s.item()
         self._episode_pendulum_speed_deg_s_sum[env_ids] = 0.0
         self._episode_pendulum_speed_deg_s_count[env_ids] = 0
+        smoothness_steps = torch.clamp(self._episode_smoothness_count[env_ids], min=1).to(dtype=torch.float)
+        for key, metric_sum in self._episode_smoothness_sums.items():
+            extras[f"Episode_Metric/mean_{key}"] = torch.mean(metric_sum[env_ids] / smoothness_steps).item()
+            metric_sum[env_ids] = 0.0
+        self._episode_smoothness_count[env_ids] = 0
         if self.cfg.enable_curriculum and self.cfg.curriculum_total_steps > 0:
             extras["Episode_Metric/curriculum_progress"] = min(1.0, max(0.0, self.common_step_counter / self.cfg.curriculum_total_steps))
         else:

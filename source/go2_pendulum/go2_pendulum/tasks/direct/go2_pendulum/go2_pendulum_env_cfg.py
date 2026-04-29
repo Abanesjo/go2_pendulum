@@ -304,11 +304,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     feet_clearance_reward_scale = -20.0
     tracking_contacts_shaped_force_reward_scale = 1.0
     feet_air_time_reward_scale = 0.1
-    action_magnitude_reward_scale = -0.1
-    action_rate_reward_scale = -0.02
-    action_acc_reward_scale = -0.02
-    torque_reward_scale = -0.0002
-    torque_rate_reward_scale = -1.0e-4
+    action_magnitude_reward_scale = -0.05
+    action_rate_reward_scale = -0.12
+    action_acc_reward_scale = -0.08
+    torque_reward_scale = -3.0e-4
+    torque_rate_reward_scale = -5.0e-4
     orient_reward_scale = 0.4
     orient_reward_sigma = 0.05
     lin_vel_z_reward_scale = -2.0
