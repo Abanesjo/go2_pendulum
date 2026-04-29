@@ -63,8 +63,9 @@
 #
 # Action semantics:
 #   - These 12 values are joint-position offsets, not absolute joint targets.
-#   - With domain randomization enabled, the task may delay/hold action packets
-#     and lag the resulting torque command. There is no hard action clipping.
+#   - With domain randomization enabled, the task may delay/hold action packets.
+#     The delivered action is always low-pass filtered before it is sent as the command.
+#     The resulting torque command may also be lagged. There is no hard action clipping.
 #   - The delivered action is converted to desired joint positions:
 #
 #       q_des = q_default + action_scale * action
@@ -263,6 +264,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     proprio_delay_steps_range = (0, 1)
     base_lin_vel_delay_steps_range = (0, 2)
     pendulum_delay_steps_range = (0, 3)
+    action_low_pass_cutoff_hz = 5.0
 
     # Packet holds repeat the previously delivered action/observation packet.
     action_hold_prob = 0.01
@@ -307,7 +309,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     action_acc_reward_scale = -0.02
     torque_reward_scale = -0.0002
     torque_rate_reward_scale = -1.0e-4
-    orient_reward_scale = 0.8
+    orient_reward_scale = 0.4
     orient_reward_sigma = 0.05
     lin_vel_z_reward_scale = -2.0
     dof_vel_reward_scale = -0.003

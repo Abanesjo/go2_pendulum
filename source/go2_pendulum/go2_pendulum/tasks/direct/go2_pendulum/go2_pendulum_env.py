@@ -190,6 +190,13 @@ class Go2PendulumEnv(DirectRLEnv):
         self._action_dim = gym.spaces.flatdim(self.single_action_space)
         if self.cfg.action_scale <= 0.0:
             raise ValueError(f"action_scale must be > 0. Got {self.cfg.action_scale}.")
+        if self.cfg.action_low_pass_cutoff_hz <= 0.0:
+            raise ValueError(
+                f"action_low_pass_cutoff_hz must be > 0. Got {self.cfg.action_low_pass_cutoff_hz}."
+            )
+        self._action_filter_alpha = 1.0 - math.exp(
+            -2.0 * math.pi * self.cfg.action_low_pass_cutoff_hz * self.step_dt
+        )
         self._validate_domain_randomization_cfg()
         seed_cfg = getattr(self.cfg, "seed", None)
         seed = 0 if seed_cfg is None else int(seed_cfg)
@@ -227,6 +234,7 @@ class Go2PendulumEnv(DirectRLEnv):
 
         # Joint position command from the latest delayed policy action offsets relative to default joint positions.
         self.last_action = torch.zeros(self.num_envs, self._action_dim, device=self.device)
+        self._filtered_action = torch.zeros_like(self.last_action)
         self.desired_joint_pos = leg_default_joint_pos.clone()
 
         # Target state [x_d, y_d, yaw_d] in environment frame.
@@ -890,7 +898,9 @@ class Go2PendulumEnv(DirectRLEnv):
         action_packet = self._maybe_hold_packet(action_packet, self._held_action_packet, self.cfg.action_hold_prob)
         self._held_action_packet = action_packet.clone()
         self._insert_delay_sample(self._action_delay_history, action_packet)
-        self.last_action = self._read_delay_sample(self._action_delay_history, self._action_delay_steps).clone()
+        delayed_action = self._read_delay_sample(self._action_delay_history, self._action_delay_steps)
+        self._filtered_action += self._action_filter_alpha * (delayed_action - self._filtered_action)
+        self.last_action = self._filtered_action.clone()
         self.desired_joint_pos = self.robot.data.default_joint_pos[:, self._leg_dof_ids] + (
             self.cfg.action_scale * self.last_action
         )
@@ -1421,6 +1431,7 @@ class Go2PendulumEnv(DirectRLEnv):
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
 
         self.last_action[env_ids] = 0.0
+        self._filtered_action[env_ids] = 0.0
         self._prev_torque[env_ids] = 0.0
         self._steps_since_reset[env_ids] = 0
 
