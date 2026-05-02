@@ -333,6 +333,11 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     com_offset_y_range = (-0.03, 0.03)
     com_offset_z_range = (-0.02, 0.05)
 
+    # Foot contact material randomization.
+    enable_foot_friction_randomization = True
+    foot_friction_body_names = ("FL_foot", "FR_foot", "RL_foot", "RR_foot")
+    foot_friction_range = (0.3, 1.2)
+
     # Motor/actuator randomization.
     enable_motor_gain_randomization = True
     motor_gain_actuator_name = "base_legs"

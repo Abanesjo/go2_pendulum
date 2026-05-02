@@ -129,8 +129,8 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_terminate_duration_s=0.5,
             position_tolerance=0.2,
             enable_external_wrench_push=True,
-            push_force_x_range=(0.0, 0.0),
-            push_force_y_range=(0.0, 0.0),
+            push_force_x_range=(-10.0, 10.0),
+            push_force_y_range=(10.0, -10.0),
         ),
     }
        
@@ -390,12 +390,15 @@ class Go2PendulumEnv(DirectRLEnv):
         self._validate_range("com_offset_x_range", self.cfg.com_offset_x_range)
         self._validate_range("com_offset_y_range", self.cfg.com_offset_y_range)
         self._validate_range("com_offset_z_range", self.cfg.com_offset_z_range)
+        self._validate_range("foot_friction_range", self.cfg.foot_friction_range)
         self._validate_range("motor_strength_range", self.cfg.motor_strength_range)
         self._validate_range("kp_scale_range", self.cfg.kp_scale_range)
         self._validate_range("kd_scale_range", self.cfg.kd_scale_range)
         self._validate_range("effort_limit_scale_range", self.cfg.effort_limit_scale_range)
         self._validate_range("torque_response_tau_s_range", self.cfg.torque_response_tau_s_range)
         self._validate_range("pendulum_damping_range", self.cfg.pendulum_damping_range)
+        if self.cfg.foot_friction_range[0] < 0.0:
+            raise ValueError(f"foot_friction_range min must be >= 0. Got {self.cfg.foot_friction_range[0]}.")
         for name in ("motor_strength_range", "kp_scale_range", "kd_scale_range", "effort_limit_scale_range"):
             if getattr(self.cfg, name)[0] <= 0.0:
                 raise ValueError(f"{name} min must be > 0. Got {getattr(self.cfg, name)[0]}.")
@@ -465,6 +468,26 @@ class Go2PendulumEnv(DirectRLEnv):
     def _seconds_to_steps(self, seconds: float) -> int:
         return max(1, math.ceil(seconds / self.step_dt))
 
+    def _material_shape_ids_for_bodies(self, body_ids: Sequence[int]) -> torch.Tensor:
+        num_shapes_per_body = []
+        for link_path in self.robot.root_physx_view.link_paths[0]:
+            link_physx_view = self.robot._physics_sim_view.create_rigid_body_view(link_path)
+            num_shapes_per_body.append(link_physx_view.max_shapes)
+
+        total_num_shapes = sum(num_shapes_per_body)
+        expected_num_shapes = self.robot.root_physx_view.max_shapes
+        if total_num_shapes != expected_num_shapes:
+            raise RuntimeError(
+                "Failed to map body material shapes. "
+                f"Expected {expected_num_shapes} shapes, resolved {total_num_shapes}."
+            )
+
+        shape_ids = []
+        for body_id in body_ids:
+            start_idx = sum(num_shapes_per_body[:body_id])
+            shape_ids.extend(range(start_idx, start_idx + num_shapes_per_body[body_id]))
+        return torch.tensor(shape_ids, dtype=torch.long, device="cpu")
+
     def _init_domain_randomization_state(self) -> None:
         self._dr_all_env_ids = torch.arange(self.num_envs, device=self.device, dtype=torch.long)
 
@@ -480,6 +503,21 @@ class Go2PendulumEnv(DirectRLEnv):
         self._default_masses_cpu = self.robot.root_physx_view.get_masses().clone()
         self._default_inertias_cpu = self.robot.root_physx_view.get_inertias().clone()
         self._default_coms_cpu = self.robot.root_physx_view.get_coms().clone()
+
+        # Foot contact material randomization state.
+        self._foot_material_shape_ids_cpu = torch.tensor([], dtype=torch.long, device="cpu")
+        self._default_materials_cpu = self.robot.root_physx_view.get_material_properties().clone()
+        if self.cfg.enable_domain_randomization and self.cfg.enable_foot_friction_randomization:
+            foot_body_ids = []
+            for body_name in self.cfg.foot_friction_body_names:
+                body_ids, _ = self.robot.find_bodies(body_name)
+                if len(body_ids) != 1:
+                    raise RuntimeError(f"Expected exactly one foot body for '{body_name}', got {body_ids}.")
+                foot_body_ids.append(body_ids[0])
+            self._foot_material_shape_ids_cpu = self._material_shape_ids_for_bodies(foot_body_ids)
+            if self._foot_material_shape_ids_cpu.numel() == 0:
+                raise RuntimeError("Foot friction randomization resolved no material shapes.")
+            self._randomize_foot_friction(self._dr_all_env_ids)
 
         # Motor gain randomization state.
         self._motor_actuator = None
@@ -625,6 +663,24 @@ class Go2PendulumEnv(DirectRLEnv):
             com_offsets[:, :, 2] = self._sample_uniform_cpu(self.cfg.com_offset_z_range, (env_ids_cpu.numel(), 1))
             coms[env_ids_cpu[:, None], body_ids_cpu, :3] += com_offsets
             self.robot.root_physx_view.set_coms(coms, env_ids_cpu)
+
+    def _randomize_foot_friction(self, env_ids: torch.Tensor) -> None:
+        if not (self.cfg.enable_domain_randomization and self.cfg.enable_foot_friction_randomization):
+            return
+        if self._foot_material_shape_ids_cpu.numel() == 0:
+            return
+        env_ids_cpu = env_ids.to(device="cpu", dtype=torch.long)
+        if env_ids_cpu.numel() == 0:
+            return
+
+        shape_ids_cpu = self._foot_material_shape_ids_cpu
+        materials = self.robot.root_physx_view.get_material_properties()
+        materials[env_ids_cpu[:, None], shape_ids_cpu] = self._default_materials_cpu[
+            env_ids_cpu[:, None], shape_ids_cpu
+        ]
+        friction = self._sample_uniform_cpu(self.cfg.foot_friction_range, (env_ids_cpu.numel(), 1, 1))
+        materials[env_ids_cpu[:, None], shape_ids_cpu, 0:2] = friction
+        self.robot.root_physx_view.set_material_properties(materials, env_ids_cpu)
 
     def _randomize_motor_gains(self, env_ids: torch.Tensor) -> None:
         if not (self.cfg.enable_domain_randomization and self.cfg.enable_motor_gain_randomization):
