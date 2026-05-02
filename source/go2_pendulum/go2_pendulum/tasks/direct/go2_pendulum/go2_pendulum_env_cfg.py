@@ -63,8 +63,8 @@
 #
 # Action semantics:
 #   - These 12 values are joint-position offsets, not absolute joint targets.
-#   - With domain randomization enabled, the task may delay/hold action packets
-#     and lag the resulting torque command. There is no hard action clipping.
+#   - With domain randomization enabled, the task may delay/hold action packets.
+#     There is no hard action clipping.
 #   - The delivered action is converted to desired joint positions:
 #
 #       q_des = q_default + action_scale * action
@@ -345,7 +345,6 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     kp_scale_range = (0.8, 1.3)
     kd_scale_range = (0.5, 1.5)
     effort_limit_scale_range = (0.7, 1.0)
-    torque_response_tau_s_range = (0.005, 0.020)
     motor_gain_per_joint = True
     enable_pendulum_damping_randomization = True
     pendulum_damping_range = (0.0, 0.5)

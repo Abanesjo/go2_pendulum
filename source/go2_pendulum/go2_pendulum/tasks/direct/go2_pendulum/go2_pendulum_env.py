@@ -395,18 +395,12 @@ class Go2PendulumEnv(DirectRLEnv):
         self._validate_range("kp_scale_range", self.cfg.kp_scale_range)
         self._validate_range("kd_scale_range", self.cfg.kd_scale_range)
         self._validate_range("effort_limit_scale_range", self.cfg.effort_limit_scale_range)
-        self._validate_range("torque_response_tau_s_range", self.cfg.torque_response_tau_s_range)
         self._validate_range("pendulum_damping_range", self.cfg.pendulum_damping_range)
         if self.cfg.foot_friction_range[0] < 0.0:
             raise ValueError(f"foot_friction_range min must be >= 0. Got {self.cfg.foot_friction_range[0]}.")
         for name in ("motor_strength_range", "kp_scale_range", "kd_scale_range", "effort_limit_scale_range"):
             if getattr(self.cfg, name)[0] <= 0.0:
                 raise ValueError(f"{name} min must be > 0. Got {getattr(self.cfg, name)[0]}.")
-        if self.cfg.torque_response_tau_s_range[0] < 0.0:
-            raise ValueError(
-                "torque_response_tau_s_range min must be >= 0. "
-                f"Got {self.cfg.torque_response_tau_s_range[0]}."
-            )
         if self.cfg.pendulum_damping_range[0] < 0.0:
             raise ValueError(
                 "pendulum_damping_range min must be >= 0. "
@@ -530,7 +524,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self._pd_damping = torch.full((self.num_envs, self._action_dim), 0.6, device=self.device)
         self._motor_strength = torch.ones((self.num_envs, self._action_dim), device=self.device)
         self._randomized_effort_limit = torch.full((self.num_envs, self._action_dim), 23.5, device=self.device)
-        self._lagged_torque = torch.zeros((self.num_envs, self._action_dim), device=self.device)
         if self.cfg.enable_domain_randomization and self.cfg.enable_motor_gain_randomization:
             if self.cfg.motor_gain_actuator_name not in self.robot.actuators:
                 raise RuntimeError(
@@ -557,7 +550,7 @@ class Go2PendulumEnv(DirectRLEnv):
             self._motor_actuator.stiffness[:] = 0.0
             self._motor_actuator.damping[:] = 0.0
 
-        # Per-episode delay, hold, and command-response state.
+        # Per-episode delay and packet-hold state.
         max_action_delay = int(self.cfg.action_delay_steps_range[1])
         max_proprio_delay = int(self.cfg.proprio_delay_steps_range[1])
         max_base_lin_vel_delay = int(self.cfg.base_lin_vel_delay_steps_range[1])
@@ -603,7 +596,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self._delivered_proprio_obs = torch.zeros(self.num_envs, proprio_dim, device=self.device)
         self._delivered_pendulum_obs = torch.zeros(self.num_envs, pendulum_dim, device=self.device)
         self._delivered_imu_obs = torch.zeros(self.num_envs, imu_dim, device=self.device)
-        self._torque_response_tau_s = torch.zeros(self.num_envs, self._action_dim, device=self.device)
 
         # Sensor bias / drift state.
         self._bias_body_lin_vel = torch.zeros((self.num_envs, 3), device=self.device)
@@ -733,7 +725,6 @@ class Go2PendulumEnv(DirectRLEnv):
             self._proprio_delay_steps[env_ids] = 0
             self._base_lin_vel_delay_steps[env_ids] = 0
             self._pendulum_delay_steps[env_ids] = 0
-            self._torque_response_tau_s[env_ids] = 0.0
             return
         num_envs = env_ids.numel()
         self._action_delay_steps[env_ids] = self._sample_delay_steps(
@@ -747,9 +738,6 @@ class Go2PendulumEnv(DirectRLEnv):
         )
         self._pendulum_delay_steps[env_ids] = self._sample_delay_steps(
             self.cfg.pendulum_delay_steps_range, (num_envs,), self.device
-        )
-        self._torque_response_tau_s[env_ids] = self._sample_uniform_device(
-            self.cfg.torque_response_tau_s_range, (num_envs, self._action_dim), self.device
         )
 
     def _sample_sensor_biases(self, env_ids: torch.Tensor) -> None:
@@ -957,14 +945,7 @@ class Go2PendulumEnv(DirectRLEnv):
         desired_torque = self._motor_strength * (
             self._pd_stiffness * (self.desired_joint_pos - q) - self._pd_damping * dq
         )
-        tau = self._torque_response_tau_s
-        alpha = torch.where(
-            tau > 0.0,
-            1.0 - torch.exp(-self.physics_dt / tau),
-            torch.ones_like(tau),
-        )
-        self._lagged_torque += alpha * (desired_torque - self._lagged_torque)
-        torque = torch.clamp(self._lagged_torque, -self._randomized_effort_limit, self._randomized_effort_limit)
+        torque = torch.clamp(desired_torque, -self._randomized_effort_limit, self._randomized_effort_limit)
         self.robot.set_joint_position_target(q, joint_ids=self._leg_dof_ids)
         self.robot.set_joint_velocity_target(dq, joint_ids=self._leg_dof_ids)
         self.robot.set_joint_effort_target(torque, joint_ids=self._leg_dof_ids)
@@ -1532,7 +1513,6 @@ class Go2PendulumEnv(DirectRLEnv):
         joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
         joint_vel = self.robot.data.default_joint_vel[env_ids].clone()
         self.desired_joint_pos[env_ids] = joint_pos[:, self._leg_dof_ids]
-        self._lagged_torque[env_ids] = 0.0
 
         if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
             if self._pendulum_dof_ids.numel() != 2:
