@@ -275,12 +275,12 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     joint_pos_bias_rad = 0.010
     joint_vel_noise_rad_s = 0.50
     joint_vel_bias_rad_s = 0.05
-    base_lin_vel_noise_m_s = 0.10
-    base_lin_vel_bias_m_s = 0.03
+    base_lin_vel_noise_m_s = 2.0
+    base_lin_vel_bias_m_s = 0.5
     base_ang_vel_noise_rad_s = 0.25
     base_ang_vel_bias_rad_s = 0.02
     projected_gravity_component_noise = 0.025
-    pendulum_pos_noise_rad = 0.008
+    pendulum_pos_noise_rad = 0.01
     pendulum_pos_bias_rad = 0.005
     pendulum_vel_noise_rad_s = 0.40
     pendulum_vel_bias_rad_s = 0.05

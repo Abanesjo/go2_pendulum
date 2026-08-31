@@ -23,3 +23,14 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     },
 )
+
+
+gym.register(
+    id="Template-Go2-Pendulum-GRU-Direct-v0",
+    entry_point=f"{__name__}.go2_pendulum_env:Go2PendulumEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.go2_pendulum_env_cfg:Go2PendulumEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:GRUPPORunnerCfg",
+    },
+)

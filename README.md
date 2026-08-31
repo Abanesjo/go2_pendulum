@@ -2,7 +2,10 @@
 
 Isaac Lab extension for training a Unitree Go2 quadruped with a 2-DoF inverted pendulum. The task combines balance, locomotion, and target-reaching with an asymmetric actor-critic observation setup.
 
-The environment is registered as `Template-Go2-Pendulum-Direct-v0`.
+The environment is registered with two RSL-RL policy variants:
+
+- `Template-Go2-Pendulum-Direct-v0`: feed-forward MLP policy
+- `Template-Go2-Pendulum-GRU-Direct-v0`: recurrent GRU-MLP policy
 
 ## What This Repo Contains
 
@@ -27,14 +30,14 @@ The environment is registered as `Template-Go2-Pendulum-Direct-v0`.
 - [go2_pendulum_env_cfg.py](/home/john/Documents/isaaclab_projects/go2_pendulum/source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/go2_pendulum_env_cfg.py): task config, reward scales, noise, domain randomization, simulation settings
 - [go2_pendulum_env.py](/home/john/Documents/isaaclab_projects/go2_pendulum/source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/go2_pendulum_env.py): DirectRLEnv implementation, observations, rewards, dones, reset logic, curriculum
 - [rsl_rl_ppo_cfg.py](/home/john/Documents/isaaclab_projects/go2_pendulum/source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/agents/rsl_rl_ppo_cfg.py): PPO runner config
-- [__init__.py](/home/john/Documents/isaaclab_projects/go2_pendulum/source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/__init__.py): Gym registration for `Template-Go2-Pendulum-Direct-v0`
+- [__init__.py](/home/john/Documents/isaaclab_projects/go2_pendulum/source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/__init__.py): Gym registration for the MLP and GRU task variants
 
 ## Environment Setup
 
 Activate the Isaac Lab environment:
 
 ```bash
-source ~/environments/isaac/bin/activate
+conda activate isaac
 ```
 
 Install the extension in editable mode:
@@ -56,6 +59,16 @@ Train with RSL-RL:
 ```bash
 python scripts/rsl_rl/train.py --task=Template-Go2-Pendulum-Direct-v0 --headless
 ```
+
+Train the recurrent GRU-MLP policy with RSL-RL:
+
+```bash
+python scripts/rsl_rl/train.py --task=Template-Go2-Pendulum-GRU-Direct-v0 --headless
+```
+
+The GRU task reuses the same environment, including the 56-D actor/critic observations and 12-D actions. Its
+checkpoints are written under `logs/rsl_rl/go2_pendulum_gru_direct/`. The recurrent architecture is incompatible
+with checkpoints from the MLP task, so GRU training must start fresh or resume from a compatible GRU checkpoint.
 
 Play a trained checkpoint:
 
