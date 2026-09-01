@@ -75,6 +75,6 @@ tests/
 #Agents
 CLAUDE.md
 
-.vscode/
+.vscode/**
 /**/.codex
 references/**
