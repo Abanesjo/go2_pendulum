@@ -18,13 +18,14 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 32
     max_iterations = 25000
     save_interval = 50
+    # Contract v2 is intentionally checkpoint-incompatible with earlier runs.
     experiment_name = "go2_pendulum_direct"
-    clip_actions = 100.0
+    clip_actions = 2.0
     obs_groups = {"policy": ["policy"], "critic": ["critic"]}
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
-        actor_obs_normalization=False,
-        critic_obs_normalization=False,
+        actor_obs_normalization=True,
+        critic_obs_normalization=True,
         actor_hidden_dims=[256, 256, 64],
         critic_hidden_dims=[256, 256, 64],
         activation="elu",
@@ -52,8 +53,8 @@ class GRUPPORunnerCfg(PPORunnerCfg):
     experiment_name = "go2_pendulum_gru_direct"
     policy = RslRlPpoActorCriticRecurrentCfg(
         init_noise_std=1.0,
-        actor_obs_normalization=False,
-        critic_obs_normalization=False,
+        actor_obs_normalization=True,
+        critic_obs_normalization=True,
         actor_hidden_dims=[256, 256, 64],
         critic_hidden_dims=[256, 256, 64],
         activation="elu",

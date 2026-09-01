@@ -58,17 +58,23 @@ import platform
 
 from packaging import version
 
-# check minimum supported rsl-rl version
+# Check the supported RSL-RL major-version range. Keep 3.0.1 as the
+# reproducible recommended install while accepting compatible 3.x releases.
 RSL_RL_VERSION = "3.0.1"
+RSL_RL_MAX_VERSION = "4.0.0"
 installed_version = metadata.version("rsl-rl-lib")
-if version.parse(installed_version) < version.parse(RSL_RL_VERSION):
+installed_version_parsed = version.parse(installed_version)
+if not (
+    version.parse(RSL_RL_VERSION) <= installed_version_parsed < version.parse(RSL_RL_MAX_VERSION)
+):
     if platform.system() == "Windows":
         cmd = [r".\isaaclab.bat", "-p", "-m", "pip", "install", f"rsl-rl-lib=={RSL_RL_VERSION}"]
     else:
         cmd = ["./isaaclab.sh", "-p", "-m", "pip", "install", f"rsl-rl-lib=={RSL_RL_VERSION}"]
     print(
         f"Please install the correct version of RSL-RL.\nExisting version is: '{installed_version}'"
-        f" and required version is: '{RSL_RL_VERSION}'.\nTo install the correct version, run:"
+        f" and the supported range is: >={RSL_RL_VERSION},<{RSL_RL_MAX_VERSION}."
+        f"\nThe recommended version is: '{RSL_RL_VERSION}'. To install it, run:"
         f"\n\n\t{' '.join(cmd)}\n"
     )
     exit(1)
@@ -76,6 +82,7 @@ if version.parse(installed_version) < version.parse(RSL_RL_VERSION):
 """Rest everything follows."""
 
 import logging
+import math
 import os
 import time
 from datetime import datetime
@@ -83,6 +90,8 @@ from datetime import datetime
 import gymnasium as gym
 import torch
 from rsl_rl.runners import OnPolicyRunner
+
+from rsl_rl_compat import sanitize_rsl_rl_config
 
 from isaaclab.envs import (
     DirectMARLEnv,
@@ -112,6 +121,39 @@ torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
 
 
+def _validate_checkpoint_contract(checkpoint_path: str, expected_version: str) -> None:
+    """Reject checkpoints whose saved environment does not declare this policy contract."""
+    env_metadata_path = os.path.join(os.path.dirname(checkpoint_path), "params", "env.yaml")
+    if not os.path.isfile(env_metadata_path):
+        raise RuntimeError(
+            "Cannot verify the checkpoint policy contract because its params/env.yaml is missing: "
+            f"{env_metadata_path}. Contract-v1 checkpoints must not be resumed as v2."
+        )
+
+    saved_version = None
+    with open(env_metadata_path, encoding="utf-8") as metadata_file:
+        for line in metadata_file:
+            if line.startswith("policy_contract_version:"):
+                saved_version = line.split(":", maxsplit=1)[1].strip().strip("'\"")
+                break
+    if saved_version != expected_version:
+        raise RuntimeError(
+            f"Checkpoint policy contract mismatch: expected '{expected_version}', found "
+            f"'{saved_version or 'missing'}' in {env_metadata_path}. Start a fresh v2 run instead."
+        )
+
+
+def _checkpoint_iteration(checkpoint_path: str) -> int:
+    """Read RSL-RL's zero-based index of the last completed rollout/update."""
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if "iter" not in checkpoint:
+        raise RuntimeError(f"Checkpoint does not contain RSL-RL iteration metadata: {checkpoint_path}")
+    iteration = int(checkpoint["iter"])
+    if iteration < 0:
+        raise RuntimeError(f"Checkpoint iteration must be non-negative, got {iteration}.")
+    return iteration
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Train with RSL-RL agent."""
@@ -121,6 +163,29 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     agent_cfg.max_iterations = (
         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg.max_iterations
     )
+
+    # Keep the environment curriculum synchronized with the actual rollout
+    # horizon after every Hydra and command-line override. The five equal
+    # stages therefore put level 5 at 80% of any run, instead of accidentally
+    # making the highest levels unreachable.
+    if hasattr(env_cfg, "curriculum_total_steps"):
+        if agent_cfg.max_iterations <= 0 or agent_cfg.num_steps_per_env <= 0:
+            raise ValueError(
+                "max_iterations and num_steps_per_env must both be positive to derive the curriculum duration."
+            )
+        env_cfg.curriculum_total_steps = int(agent_cfg.max_iterations * agent_cfg.num_steps_per_env)
+        print(
+            "[INFO] Curriculum duration set from the final training horizon: "
+            f"{env_cfg.curriculum_total_steps} policy steps "
+            f"({agent_cfg.max_iterations} iterations x {agent_cfg.num_steps_per_env} steps)."
+        )
+    if hasattr(env_cfg, "action_clip") and not math.isclose(
+        float(agent_cfg.clip_actions), float(env_cfg.action_clip), rel_tol=0.0, abs_tol=1.0e-9
+    ):
+        raise ValueError(
+            f"Runner clip_actions ({agent_cfg.clip_actions}) must match the environment action_clip "
+            f"({env_cfg.action_clip}) for policy contract v2."
+        )
 
     # set the environment seed
     # note: certain randomizations occur in the environment initialization so we set the seed here
@@ -167,17 +232,30 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # set the log directory for the environment (works for all environment types)
     env_cfg.log_dir = log_dir
 
+    # Resolve and validate a resume checkpoint before constructing the
+    # environment. DirectRLEnv's common_step_counter is not checkpointed, so
+    # seed its curriculum offset from the saved RSL-RL iteration.
+    resume_path = None
+    if agent_cfg.resume:
+        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+        if hasattr(env_cfg, "policy_contract_version"):
+            _validate_checkpoint_contract(resume_path, str(env_cfg.policy_contract_version))
+        if hasattr(env_cfg, "curriculum_start_step"):
+            resume_iteration = _checkpoint_iteration(resume_path)
+            completed_iterations = resume_iteration + 1
+            env_cfg.curriculum_start_step = int(completed_iterations * agent_cfg.num_steps_per_env)
+            print(
+                "[INFO] Resuming curriculum from policy step "
+                f"{env_cfg.curriculum_start_step} (checkpoint iteration {resume_iteration}; "
+                f"{completed_iterations} completed rollouts)."
+            )
+
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):
         env = multi_agent_to_single_agent(env)
-
-    # save checkpoint path before creating a new log_dir
-    resume_path = None
-    if agent_cfg.resume:
-        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
     # wrap for video recording
     if args_cli.video:
@@ -197,7 +275,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
     # create runner from rsl-rl
-    runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
+    runner_cfg = sanitize_rsl_rl_config(agent_cfg.to_dict())
+    runner = OnPolicyRunner(env, runner_cfg, log_dir=log_dir, device=agent_cfg.device)
     # write git state to logs
     runner.add_git_repo_to_log(__file__)
     # load the checkpoint
