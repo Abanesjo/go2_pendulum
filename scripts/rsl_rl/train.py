@@ -127,7 +127,7 @@ def _validate_checkpoint_contract(checkpoint_path: str, expected_version: str) -
     if not os.path.isfile(env_metadata_path):
         raise RuntimeError(
             "Cannot verify the checkpoint policy contract because its params/env.yaml is missing: "
-            f"{env_metadata_path}. Contract-v1 checkpoints must not be resumed as v2."
+            f"{env_metadata_path}. Older checkpoints must not be resumed under the current contract."
         )
 
     saved_version = None
@@ -139,7 +139,7 @@ def _validate_checkpoint_contract(checkpoint_path: str, expected_version: str) -
     if saved_version != expected_version:
         raise RuntimeError(
             f"Checkpoint policy contract mismatch: expected '{expected_version}', found "
-            f"'{saved_version or 'missing'}' in {env_metadata_path}. Start a fresh v2 run instead."
+            f"'{saved_version or 'missing'}' in {env_metadata_path}. Start a fresh v3 run instead."
         )
 
 
@@ -164,27 +164,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg.max_iterations
     )
 
-    # Keep the environment curriculum synchronized with the actual rollout
-    # horizon after every Hydra and command-line override. The five equal
-    # stages therefore put level 5 at 80% of any run, instead of accidentally
-    # making the highest levels unreachable.
+    # Resolve the requested number of *new* policy steps after every Hydra and
+    # command-line override.  RSL-RL interprets max_iterations as additional
+    # iterations when resuming, so the completed checkpoint steps are added to
+    # the curriculum horizon after the checkpoint is resolved below.
+    curriculum_run_steps = None
     if hasattr(env_cfg, "curriculum_total_steps"):
         if agent_cfg.max_iterations <= 0 or agent_cfg.num_steps_per_env <= 0:
             raise ValueError(
                 "max_iterations and num_steps_per_env must both be positive to derive the curriculum duration."
             )
-        env_cfg.curriculum_total_steps = int(agent_cfg.max_iterations * agent_cfg.num_steps_per_env)
-        print(
-            "[INFO] Curriculum duration set from the final training horizon: "
-            f"{env_cfg.curriculum_total_steps} policy steps "
-            f"({agent_cfg.max_iterations} iterations x {agent_cfg.num_steps_per_env} steps)."
-        )
+        curriculum_run_steps = int(agent_cfg.max_iterations * agent_cfg.num_steps_per_env)
     if hasattr(env_cfg, "action_clip") and not math.isclose(
         float(agent_cfg.clip_actions), float(env_cfg.action_clip), rel_tol=0.0, abs_tol=1.0e-9
     ):
         raise ValueError(
             f"Runner clip_actions ({agent_cfg.clip_actions}) must match the environment action_clip "
-            f"({env_cfg.action_clip}) for policy contract v2."
+            f"({env_cfg.action_clip}) for policy contract v3."
         )
 
     # set the environment seed
@@ -249,6 +245,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 f"{env_cfg.curriculum_start_step} (checkpoint iteration {resume_iteration}; "
                 f"{completed_iterations} completed rollouts)."
             )
+
+    if curriculum_run_steps is not None:
+        curriculum_start_step = int(getattr(env_cfg, "curriculum_start_step", 0))
+        env_cfg.curriculum_total_steps = curriculum_start_step + curriculum_run_steps
+        print(
+            "[INFO] Curriculum horizon set to "
+            f"{env_cfg.curriculum_total_steps} policy steps "
+            f"({curriculum_start_step} completed + {agent_cfg.max_iterations} iterations x "
+            f"{agent_cfg.num_steps_per_env} steps)."
+        )
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)

@@ -18,8 +18,8 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 32
     max_iterations = 25000
     save_interval = 50
-    # Contract v2 is intentionally checkpoint-incompatible with earlier runs.
-    experiment_name = "go2_pendulum_direct"
+    # Contract v3 is intentionally checkpoint-incompatible with earlier runs.
+    experiment_name = "go2_pendulum_direct_v3"
     clip_actions = 2.0
     obs_groups = {"policy": ["policy"], "critic": ["critic"]}
     policy = RslRlPpoActorCriticCfg(
@@ -50,7 +50,7 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
 class GRUPPORunnerCfg(PPORunnerCfg):
     """PPO runner configuration with recurrent GRU actor and critic policies."""
 
-    experiment_name = "go2_pendulum_gru_direct"
+    experiment_name = "go2_pendulum_gru_direct_v3"
     policy = RslRlPpoActorCriticRecurrentCfg(
         init_noise_std=1.0,
         actor_obs_normalization=True,

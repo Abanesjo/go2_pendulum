@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 # -----------------------------------------------------------------------------
-# Policy contract v2 (old checkpoints are intentionally incompatible)
+# Policy contract v3 (old checkpoints are intentionally incompatible)
 #
 # Actor observations (56-D):
 #   0:3    body linear velocity from 50 Hz finite-differenced mocap position
@@ -63,7 +63,7 @@ GO2_LEG_JOINT_NAMES = [
 
 GO2_PENDULUM_JOINT_NAMES = ["pendulum_joint1", "pendulum_joint2"]
 
-POLICY_CONTRACT_VERSION = "go2_pendulum_policy_v2"
+POLICY_CONTRACT_VERSION = "go2_pendulum_policy_v3"
 POLICY_OBSERVATION_DIM = 56
 POLICY_ACTION_DIM = 12
 
@@ -169,31 +169,33 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     evaluation_dr_scale_multiplier = 1.0
     evaluation_push_scale_multiplier = 1.0
 
-    # --- Difficulty-dependent defaults (level 1 initial values) ---
-    # These are updated at runtime by the difficulty curriculum.
-    # See _DIFFICULTY_PRESETS in go2_pendulum_env.py for all five levels.
+    # --- Difficulty-dependent defaults (first curriculum anchor) ---
+    # These are interpolated at runtime between the five anchors in
+    # go2_pendulum_env.py. A difficulty override pins one exact anchor.
 
     # Per-reset level-1 goal mixture: planted/nearby/walking tasks. Curriculum
     # presets update these without ever removing planted examples.
-    goal_distance_mixture = (0.70, 0.30, 0.0)
+    goal_distance_mixture = (0.50, 0.40, 0.10)
     goal_stand_distance_range = (0.0, 0.05)
-    goal_short_distance_range = (0.05, 0.20)
-    goal_walk_distance_range = (0.20, 0.20)
+    goal_short_distance_range = (0.10, 0.35)
+    goal_walk_distance_range = (0.35, 1.50)
     # Goal chains are biased toward locomotion because true planted starts are
     # already supplied by the reset mixture above.
     enable_goal_chaining = True
-    goal_chain_distance_mixture = (0.10, 0.20, 0.70)
+    goal_chain_distance_mixture = (0.10, 0.55, 0.35)
     goal_chain_post_arrival_hold_s = 1.0
+    # Evaluation may force a single class without changing training mixtures.
+    goal_profile_override: str = "mixed"  # mixed | stand | short | walk
 
-    # Bearing of the target position in the environment frame.
-    # A full-circle range keeps the target position free to spawn anywhere around the robot.
-    goal_randomization_angle_min = math.radians(-180)
-    goal_randomization_angle_max = math.radians(180)
+    # Bearing offset from the reset/current base yaw. The range grows from a
+    # forward-facing cone to the full circle during the curriculum.
+    goal_randomization_angle_min = math.radians(-45)
+    goal_randomization_angle_max = math.radians(45)
 
     # Desired robot heading offset from the final perturbed reset/current base
     # heading. Planted goals use the narrower dedicated range.
-    goal_yaw_randomization_min = math.radians(-5.0)
-    goal_yaw_randomization_max = math.radians(5.0)
+    goal_yaw_randomization_min = math.radians(-10.0)
+    goal_yaw_randomization_max = math.radians(10.0)
     goal_stand_yaw_offset_range = (math.radians(-2.0), math.radians(2.0))
 
     # Pendulum reset angle sampling.
@@ -232,9 +234,17 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_contact_force_threshold = 1.0
     pendulum_terminate_angle_rad = math.radians(20.0)
     pendulum_terminate_duration_s = 0.25
-    # This is a divergence guard, not an arrival tolerance.
-    position_tolerance = 2.5
-    position_terminate_duration_s = 0.25
+    # Goal-relative locomotion guards. Planted-class goals are exempt from the
+    # progress watchdog and relative divergence; the absolute guard remains a
+    # final arena-safety bound for every goal class.
+    absolute_position_divergence_m = 2.5
+    absolute_position_divergence_duration_s = 0.25
+    relative_position_divergence_margin_m = 0.35
+    relative_position_divergence_duration_s = 0.50
+    goal_watchdog_initial_window_s = 4.0
+    goal_watchdog_progress_window_s = 3.0
+    goal_watchdog_exempt_distance_m = 0.08
+    goal_watchdog_push_cooldown_s = 0.50
     termination_penalty = -20.0
 
     # --- Analytic world-goal to body-command navigation layer ---
@@ -318,19 +328,24 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     pendulum_vel_bias_rad_s = 0.0
 
     # Position tracking and heading alignment.
-    # Legacy direct goal/progress terms are disabled in contract v2. The
-    # command tracking and hold terms below replace them.
+    # Legacy direct goal terms are disabled. Contract v3 adds signed progress,
+    # residual-distance, and locomotion-time terms below.
     position_reward_scale = 0.0
     position_reward_sigma = 0.3
-    progress_reward_scale = 0.0
+    progress_reward_scale = 4.0
+    progress_reward_clip_m = 0.02
+    goal_distance_cost_scale = -1.0
+    locomotion_time_cost_scale = -0.25
     yaw_alignment_reward_scale = 0.0
     yaw_alignment_reward_sigma = 0.2
 
-    # Body-command tracking while moving and pose/velocity settling in stand.
-    command_lin_vel_reward_sigma = 0.15
-    command_lin_vel_reward_scale = 1.5
-    command_yaw_rate_reward_sigma = 0.30
-    command_yaw_rate_reward_scale = 0.75
+    # Bounded normalized command-tracking costs apply only while locomoting.
+    # Zero error has zero cost, preventing unused command components from
+    # paying a positive reward to a stationary policy.
+    command_lin_vel_cost_normalizer_m_s = 0.6
+    command_lin_vel_reward_scale = -1.5
+    command_yaw_rate_cost_normalizer_rad_s = 1.2
+    command_yaw_rate_reward_scale = -0.75
     goal_position_hold_reward_sigma = 0.10
     goal_position_hold_reward_scale = 0.5
     goal_yaw_hold_reward_sigma = math.radians(10.0)
@@ -338,6 +353,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
     stand_lin_vel_reward_sigma = 0.08
     stand_yaw_rate_reward_sigma = 0.15
     stand_settling_reward_scale = 1.0
+    arrival_bonus_reward_scale = 5.0
 
     # Pendulum/balance rewards.
     pendulum_upright_reward_scale = 2.0
@@ -537,9 +553,14 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
                 "pendulum_joint_names contains duplicates. It must define a unique canonical pendulum joint order."
             )
         if self.action_space != POLICY_ACTION_DIM:
-            raise ValueError(f"Policy contract v2 requires {POLICY_ACTION_DIM} actions. Got {self.action_space}.")
+            raise ValueError(f"Policy contract v3 requires {POLICY_ACTION_DIM} actions. Got {self.action_space}.")
         if self.difficulty_override not in (-1, 1, 2, 3, 4, 5):
             raise ValueError(f"difficulty_override must be -1 or a level in [1, 5]. Got {self.difficulty_override}.")
+        if self.goal_profile_override not in ("mixed", "stand", "short", "walk"):
+            raise ValueError(
+                "goal_profile_override must be one of mixed, stand, short, or walk. "
+                f"Got {self.goal_profile_override!r}."
+            )
 
         if len(self.goal_distance_mixture) != 3:
             raise ValueError("goal_distance_mixture must contain (stand, short, walk) probabilities.")
@@ -591,6 +612,28 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
             raise ValueError("Stand correction gains must be non-negative.")
         if self.stand_correction_max_linear_m_s <= 0.0 or self.stand_correction_max_yaw_rate_rad_s <= 0.0:
             raise ValueError("Stand correction speed limits must be positive.")
+        if self.absolute_position_divergence_m <= 0.0:
+            raise ValueError("absolute_position_divergence_m must be positive.")
+        if self.relative_position_divergence_margin_m <= 0.0:
+            raise ValueError("relative_position_divergence_margin_m must be positive.")
+        for name in (
+            "absolute_position_divergence_duration_s",
+            "relative_position_divergence_duration_s",
+            "goal_watchdog_initial_window_s",
+            "goal_watchdog_progress_window_s",
+        ):
+            if getattr(self, name) <= 0.0:
+                raise ValueError(f"{name} must be positive.")
+        if self.goal_watchdog_exempt_distance_m < self.stand_exit_distance_m:
+            raise ValueError("goal_watchdog_exempt_distance_m must be at least stand_exit_distance_m.")
+        if self.goal_watchdog_push_cooldown_s < 0.0:
+            raise ValueError("goal_watchdog_push_cooldown_s must be non-negative.")
+        if self.progress_reward_clip_m <= 0.0:
+            raise ValueError("progress_reward_clip_m must be positive.")
+        if self.command_lin_vel_cost_normalizer_m_s <= 0.0:
+            raise ValueError("command_lin_vel_cost_normalizer_m_s must be positive.")
+        if self.command_yaw_rate_cost_normalizer_rad_s <= 0.0:
+            raise ValueError("command_yaw_rate_cost_normalizer_rad_s must be positive.")
 
         _validate_ordered_range("pendulum_mass_scale_range", self.pendulum_mass_scale_range)
         if self.pendulum_mass_scale_range[0] <= 0.0:
@@ -634,7 +677,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
         self.observation_space = 48 + 4 + 2 * len(self.pendulum_joint_names)
         if self.observation_space != POLICY_OBSERVATION_DIM:
             raise ValueError(
-                f"Policy contract v2 requires {POLICY_OBSERVATION_DIM} observations. Got {self.observation_space}."
+                f"Policy contract v3 requires {POLICY_OBSERVATION_DIM} observations. Got {self.observation_space}."
             )
         # Critic gets same structure as actor, just ground-truth (no noise).
         self.state_space = self.observation_space
@@ -642,7 +685,7 @@ class Go2PendulumEnvCfg(DirectRLEnvCfg):
         control_period_s = self.decimation * self.sim.dt
         if not math.isclose(control_period_s, 1.0 / self.policy_control_hz, rel_tol=0.0, abs_tol=1.0e-9):
             raise ValueError(
-                f"decimation * sim.dt ({control_period_s}) must match the v2 policy period "
+                f"decimation * sim.dt ({control_period_s}) must match the v3 policy period "
                 f"({1.0 / self.policy_control_hz})."
             )
 

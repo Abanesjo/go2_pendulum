@@ -23,114 +23,103 @@ from isaaclab.utils.math import sample_uniform
 from .go2_pendulum_env_cfg import Go2PendulumEnvCfg
 
 
+def _interpolate_curriculum_value(value_a, value_b, interpolation: float):
+    """Linearly interpolate scalar or tuple curriculum values."""
+    if isinstance(value_a, tuple):
+        return tuple(float(a) + (float(b) - float(a)) * interpolation for a, b in zip(value_a, value_b))
+    if isinstance(value_a, bool):
+        return value_a if interpolation < 1.0 else value_b
+    return float(value_a) + (float(value_b) - float(value_a)) * interpolation
+
+
+def _required_goal_progress(checkpoint_distance: torch.Tensor, exempt_distance: float) -> torch.Tensor:
+    """Return the v3 per-window best-distance improvement requirement."""
+    proportional = 0.20 * (checkpoint_distance - 0.05)
+    return torch.minimum(
+        torch.full_like(checkpoint_distance, 0.08),
+        torch.minimum(
+            torch.clamp(proportional, min=0.025),
+            checkpoint_distance - exempt_distance,
+        ),
+    ).clamp(min=0.0)
+
+
 class Go2PendulumEnv(DirectRLEnv):
     cfg: Go2PendulumEnvCfg
 
-    # Difficulty presets: values for each curriculum level, applied at runtime.
-    # Physical joint limits deliberately do not appear here: curriculum changes
-    # the task and disturbance distributions, not the mechanism being learned.
+    # Curriculum anchors. Training interpolates continuously between them;
+    # --difficulty 1..5 pins the corresponding anchor exactly. Physical joint
+    # limits deliberately do not appear here: curriculum changes the task and
+    # disturbance distributions, not the mechanism being learned.
+    _CURRICULUM_ANCHOR_PROGRESS = (0.0, 0.20, 0.45, 0.70, 1.0)
     _DIFFICULTY_PRESETS = {
         1: dict(
-            goal_distance_mixture=(0.70, 0.30, 0.00),
-            goal_stand_distance_range=(0.0, 0.05),
-            goal_short_distance_range=(0.05, 0.20),
-            goal_walk_distance_range=(0.20, 0.20),
-            goal_randomization_angle_min=math.radians(-180),
-            goal_randomization_angle_max=math.radians(180),
-            goal_yaw_randomization_min=math.radians(-5),
-            goal_yaw_randomization_max=math.radians(5),
+            goal_distance_mixture=(0.50, 0.40, 0.10),
+            goal_chain_distance_mixture=(0.10, 0.55, 0.35),
+            goal_randomization_angle_min=math.radians(-45),
+            goal_randomization_angle_max=math.radians(45),
+            goal_yaw_randomization_min=math.radians(-10),
+            goal_yaw_randomization_max=math.radians(10),
             pendulum_angle_min=math.radians(0.0),
             pendulum_angle_max=math.radians(3.0),
             pendulum_recovery_reset_fraction=0.0,
             domain_randomization_scale=0.25,
-            termination_grace_s=0.5,
-            pendulum_termination_grace_s=0.5,
-            base_height_terminate_duration_s=0.25,
             pendulum_terminate_angle_rad=math.radians(20.0),
-            pendulum_terminate_duration_s=0.25,
-            position_tolerance=2.5,
-            enable_external_wrench_push=False,
             push_force_x_range=(0.0, 0.0),
             push_force_y_range=(0.0, 0.0),
             push_torque_z_range=(0.0, 0.0),
         ),
         2: dict(
-            goal_distance_mixture=(0.50, 0.40, 0.10),
-            goal_stand_distance_range=(0.0, 0.05),
-            goal_short_distance_range=(0.05, 0.30),
-            goal_walk_distance_range=(0.30, 0.80),
-            goal_randomization_angle_min=math.radians(-180),
-            goal_randomization_angle_max=math.radians(180),
-            goal_yaw_randomization_min=math.radians(-15),
-            goal_yaw_randomization_max=math.radians(15),
+            goal_distance_mixture=(0.35, 0.40, 0.25),
+            goal_chain_distance_mixture=(0.10, 0.40, 0.50),
+            goal_randomization_angle_min=math.radians(-75),
+            goal_randomization_angle_max=math.radians(75),
+            goal_yaw_randomization_min=math.radians(-20),
+            goal_yaw_randomization_max=math.radians(20),
+            pendulum_angle_min=math.radians(0.0),
+            pendulum_angle_max=math.radians(3.0),
+            pendulum_recovery_reset_fraction=0.0,
+            domain_randomization_scale=0.25,
+            pendulum_terminate_angle_rad=math.radians(20.0),
+            push_force_x_range=(0.0, 0.0),
+            push_force_y_range=(0.0, 0.0),
+            push_torque_z_range=(0.0, 0.0),
+        ),
+        3: dict(
+            goal_distance_mixture=(0.25, 0.35, 0.40),
+            goal_chain_distance_mixture=(0.10, 0.30, 0.60),
+            goal_randomization_angle_min=math.radians(-120),
+            goal_randomization_angle_max=math.radians(120),
+            goal_yaw_randomization_min=math.radians(-45),
+            goal_yaw_randomization_max=math.radians(45),
             pendulum_angle_min=math.radians(0.0),
             pendulum_angle_max=math.radians(5.0),
             pendulum_recovery_reset_fraction=0.0,
             domain_randomization_scale=0.50,
-            termination_grace_s=0.5,
-            pendulum_termination_grace_s=0.5,
-            base_height_terminate_duration_s=0.25,
-            pendulum_terminate_angle_rad=math.radians(20.0),
-            pendulum_terminate_duration_s=0.25,
-            position_tolerance=2.5,
-            enable_external_wrench_push=True,
+            pendulum_terminate_angle_rad=math.radians(15.0),
             push_force_x_range=(-10.0, 10.0),
             push_force_y_range=(-10.0, 10.0),
             push_torque_z_range=(0.0, 0.0),
         ),
-        3: dict(
-            goal_distance_mixture=(0.35, 0.40, 0.25),
-            goal_stand_distance_range=(0.0, 0.05),
-            goal_short_distance_range=(0.05, 0.35),
-            goal_walk_distance_range=(0.35, 1.00),
+        4: dict(
+            goal_distance_mixture=(0.20, 0.25, 0.55),
+            goal_chain_distance_mixture=(0.10, 0.20, 0.70),
             goal_randomization_angle_min=math.radians(-180),
             goal_randomization_angle_max=math.radians(180),
-            goal_yaw_randomization_min=math.radians(-30),
-            goal_yaw_randomization_max=math.radians(30),
+            goal_yaw_randomization_min=math.radians(-75),
+            goal_yaw_randomization_max=math.radians(75),
             pendulum_angle_min=math.radians(0.0),
             pendulum_angle_max=math.radians(7.0),
             pendulum_recovery_reset_fraction=0.0,
             domain_randomization_scale=0.75,
-            termination_grace_s=0.5,
-            pendulum_termination_grace_s=0.5,
-            base_height_terminate_duration_s=0.25,
-            pendulum_terminate_angle_rad=math.radians(15.0),
-            pendulum_terminate_duration_s=0.25,
-            position_tolerance=2.5,
-            enable_external_wrench_push=True,
+            pendulum_terminate_angle_rad=math.radians(12.0),
             push_force_x_range=(-20.0, 20.0),
             push_force_y_range=(-20.0, 20.0),
-            push_torque_z_range=(0.0, 0.0),
-        ),
-        4: dict(
-            goal_distance_mixture=(0.25, 0.35, 0.40),
-            goal_stand_distance_range=(0.0, 0.05),
-            goal_short_distance_range=(0.05, 0.40),
-            goal_walk_distance_range=(0.40, 1.30),
-            goal_randomization_angle_min=math.radians(-180),
-            goal_randomization_angle_max=math.radians(180),
-            goal_yaw_randomization_min=math.radians(-60),
-            goal_yaw_randomization_max=math.radians(60),
-            pendulum_angle_min=math.radians(0.0),
-            pendulum_angle_max=math.radians(9.0),
-            pendulum_recovery_reset_fraction=0.0,
-            domain_randomization_scale=1.00,
-            termination_grace_s=0.5,
-            pendulum_termination_grace_s=0.5,
-            base_height_terminate_duration_s=0.25,
-            pendulum_terminate_angle_rad=math.radians(12.0),
-            pendulum_terminate_duration_s=0.25,
-            position_tolerance=2.5,
-            enable_external_wrench_push=True,
-            push_force_x_range=(-30.0, 30.0),
-            push_force_y_range=(-30.0, 30.0),
             push_torque_z_range=(-2.0, 2.0),
         ),
         5: dict(
-            goal_distance_mixture=(0.25, 0.25, 0.50),
-            goal_stand_distance_range=(0.0, 0.05),
-            goal_short_distance_range=(0.05, 0.45),
-            goal_walk_distance_range=(0.45, 1.50),
+            goal_distance_mixture=(0.20, 0.20, 0.60),
+            goal_chain_distance_mixture=(0.10, 0.20, 0.70),
             goal_randomization_angle_min=math.radians(-180),
             goal_randomization_angle_max=math.radians(180),
             goal_yaw_randomization_min=math.radians(-90),
@@ -139,13 +128,7 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_angle_max=math.radians(10.0),
             pendulum_recovery_reset_fraction=0.10,
             domain_randomization_scale=1.00,
-            termination_grace_s=0.5,
-            pendulum_termination_grace_s=0.5,
-            base_height_terminate_duration_s=0.25,
             pendulum_terminate_angle_rad=math.radians(12.0),
-            pendulum_terminate_duration_s=0.25,
-            position_tolerance=2.5,
-            enable_external_wrench_push=True,
             push_force_x_range=(-40.0, 40.0),
             push_force_y_range=(-40.0, 40.0),
             push_torque_z_range=(-3.0, 3.0),
@@ -292,13 +275,12 @@ class Go2PendulumEnv(DirectRLEnv):
 
         self._apply_pendulum_joint_limits()
 
+        self._curriculum_progress = 0.0
         if self.cfg.enable_curriculum:
             curriculum_start = int(getattr(self.cfg, "curriculum_start_step", 0))
             curriculum_total = max(int(self.cfg.curriculum_total_steps), 1)
             initial_progress = min(max(curriculum_start / curriculum_total, 0.0), 1.0)
-            initial_level = min(5, int(initial_progress * 5.0) + 1)
-            self._current_difficulty_level = initial_level
-            self._apply_difficulty_preset(initial_level)
+            self._apply_curriculum_progress(initial_progress)
 
         if self.cfg.difficulty_override >= 1:
             self.cfg.enable_curriculum = False
@@ -319,6 +301,28 @@ class Go2PendulumEnv(DirectRLEnv):
         # Target state [x_d, y_d, yaw_d] in environment frame.
         # x/y come from target distance + bearing; yaw is the desired robot heading at the target.
         self.target_state = None
+        self._current_goal_class = torch.full(
+            (self.num_envs,), -1, device=self.device, dtype=torch.long
+        )
+        self._goal_initial_distance = torch.zeros(self.num_envs, device=self.device)
+        self._goal_previous_distance = torch.zeros(self.num_envs, device=self.device)
+        self._goal_best_distance = torch.zeros(self.num_envs, device=self.device)
+        self._goal_checkpoint_distance = torch.zeros(self.num_envs, device=self.device)
+        self._goal_watchdog_elapsed_steps = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.long
+        )
+        self._goal_watchdog_first_window = torch.ones(
+            self.num_envs, device=self.device, dtype=torch.bool
+        )
+        self._goal_watchdog_was_exempt = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.bool
+        )
+        self._goal_relative_divergence_steps = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.long
+        )
+        self._push_watchdog_pause_until_step = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.long
+        )
         self._stand_mode = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._actor_command = torch.zeros(self.num_envs, 3, device=self.device)
         self._move_gate = torch.zeros(self.num_envs, device=self.device)
@@ -353,6 +357,10 @@ class Go2PendulumEnv(DirectRLEnv):
             "pendulum_upright",
             "pendulum_velocity",
             "arrival_dwell",
+            "arrival_bonus",
+            "goal_progress",
+            "goal_distance_cost",
+            "locomotion_time_cost",
             "action_magnitude",
             "action_rate_l2",
             "action_acc_l2",
@@ -372,6 +380,9 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_sums = {
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device) for key in episode_sum_keys
         }
+        self._episode_reward_step_count = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
         self._episode_base_height_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self._episode_base_height_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._episode_base_tilt_deg_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
@@ -384,6 +395,18 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_arrival_success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._current_goal_success_recorded = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._episode_goal_success_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._episode_goal_assignments = torch.zeros(
+            self.num_envs, 3, dtype=torch.long, device=self.device
+        )
+        self._episode_goal_successes_by_class = torch.zeros_like(self._episode_goal_assignments)
+        self._episode_commanded_speed_sum = torch.zeros(self.num_envs, device=self.device)
+        self._episode_radial_speed_sum = torch.zeros(self.num_envs, device=self.device)
+        self._episode_commanded_motion_steps = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        self._episode_actual_motion_steps = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
         self._episode_four_contact_sum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self._episode_stand_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._episode_foot_lift_events = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
@@ -415,10 +438,18 @@ class Go2PendulumEnv(DirectRLEnv):
         self._base_tilt_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._pendulum_contact_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self._pendulum_angle_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-        self._position_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self._absolute_position_terminated = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.bool
+        )
+        self._relative_position_terminated = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.bool
+        )
+        self._goal_no_progress_terminated = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.bool
+        )
         self._base_height_failure_steps = None
         self._pendulum_angle_failure_steps = None
-        self._position_failure_steps = None
+        self._absolute_position_failure_steps = None
         self._steps_since_reset = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
 
         # Observation construction advances policy-rate estimator state.  RSL-RL
@@ -484,6 +515,14 @@ class Go2PendulumEnv(DirectRLEnv):
             self.target_state = torch.zeros(self.num_envs, 3, device=self.device)
 
         num_envs = env_ids.numel()
+        profile_override = str(getattr(self.cfg, "goal_profile_override", "mixed"))
+        profile_mixtures = {
+            "stand": (1.0, 0.0, 0.0),
+            "short": (0.0, 1.0, 0.0),
+            "walk": (0.0, 0.0, 1.0),
+        }
+        if profile_override != "mixed":
+            distance_mixture = profile_mixtures[profile_override]
         mixture = torch.as_tensor(distance_mixture, device=self.device, dtype=torch.float)
         mixture_cdf = torch.cumsum(mixture, dim=0)
         mixture_draw = torch.rand(num_envs, device=self.device)
@@ -511,7 +550,8 @@ class Go2PendulumEnv(DirectRLEnv):
 
         bearing_min = min(self.cfg.goal_randomization_angle_min, self.cfg.goal_randomization_angle_max)
         bearing_max = max(self.cfg.goal_randomization_angle_min, self.cfg.goal_randomization_angle_max)
-        goal_bearing = sample_uniform(bearing_min, bearing_max, (num_envs,), self.device)
+        relative_goal_bearing = sample_uniform(bearing_min, bearing_max, (num_envs,), self.device)
+        goal_bearing = anchor_yaw + relative_goal_bearing
         goal_offset_xy = goal_distance.unsqueeze(-1) * torch.stack(
             (torch.cos(goal_bearing), torch.sin(goal_bearing)), dim=-1
         )
@@ -531,6 +571,23 @@ class Go2PendulumEnv(DirectRLEnv):
 
         self.target_state[env_ids, :2] = anchor_pos_xy + goal_offset_xy
         self.target_state[env_ids, 2] = math_utils.wrap_to_pi(anchor_yaw + goal_yaw_offset)
+
+        # A target assignment is the atomic boundary for progress rewards and
+        # both goal-relative termination guards. Preserve an active push pause
+        # across chained goals, but reset every goal-specific baseline.
+        self._current_goal_class[env_ids] = goal_class
+        self._goal_initial_distance[env_ids] = goal_distance
+        self._goal_previous_distance[env_ids] = goal_distance
+        self._goal_best_distance[env_ids] = goal_distance
+        self._goal_checkpoint_distance[env_ids] = goal_distance
+        self._goal_watchdog_elapsed_steps[env_ids] = 0
+        self._goal_watchdog_first_window[env_ids] = True
+        self._goal_watchdog_was_exempt[env_ids] = goal_distance <= float(
+            self.cfg.goal_watchdog_exempt_distance_m
+        )
+        self._goal_relative_divergence_steps[env_ids] = 0
+        if is_chain:
+            self._episode_goal_assignments[env_ids, goal_class] += 1
 
         planted_mask = goal_class == 0
         if torch.any(planted_mask):
@@ -589,7 +646,10 @@ class Go2PendulumEnv(DirectRLEnv):
         forward_speed = torch.clamp(
             float(getattr(self.cfg, "command_k_rho", 1.5)) * rho, 0.0, max_forward_speed
         )
-        forward_speed *= heading_blend * torch.clamp(torch.cos(alpha), min=0.0, max=1.0)
+        # Distance blending selects path-heading versus final-yaw control; it
+        # must not attenuate translation near a non-stand goal. At 0.10 m and
+        # aligned heading this now requests 0.15 m/s rather than ~0.039 m/s.
+        forward_speed *= torch.clamp(torch.cos(alpha), min=0.0, max=1.0)
         heading_cutoff = float(getattr(self.cfg, "command_forward_heading_cutoff_rad", math.pi / 2.0))
         forward_speed = torch.where(torch.abs(alpha) < heading_cutoff, forward_speed, torch.zeros_like(forward_speed))
 
@@ -1544,6 +1604,19 @@ class Go2PendulumEnv(DirectRLEnv):
             self._push_forces[env_ids] = push_forces
             self._push_torques[env_ids] = push_torques
             self._push_end_step[env_ids] = now_step[env_ids] + duration_steps
+            actual_wrench = (
+                torch.sum(torch.abs(push_forces), dim=(1, 2))
+                + torch.sum(torch.abs(push_torques), dim=(1, 2))
+            ) > 1.0e-8
+            cooldown_steps = math.ceil(
+                float(getattr(self.cfg, "goal_watchdog_push_cooldown_s", 0.5)) / self.step_dt
+            )
+            pause_until = self._push_end_step[env_ids] + cooldown_steps
+            self._push_watchdog_pause_until_step[env_ids] = torch.where(
+                actual_wrench,
+                torch.maximum(self._push_watchdog_pause_until_step[env_ids], pause_until),
+                self._push_watchdog_pause_until_step[env_ids],
+            )
             self._schedule_next_push(env_ids, self._push_end_step[env_ids])
 
         self.robot.set_external_force_and_torque(
@@ -1554,6 +1627,9 @@ class Go2PendulumEnv(DirectRLEnv):
         )
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
+        # Curriculum state advances with policy actions, never with observation
+        # queries, preserving the observation cache's idempotence contract.
+        self._update_curriculum()
         self._update_external_wrench_pushes()
         # Policies in relabeled episodes act in mirrored coordinates.  Convert
         # back to the physical robot before all transport and safety dynamics.
@@ -1600,51 +1676,59 @@ class Go2PendulumEnv(DirectRLEnv):
         self.robot.set_joint_effort_target(torque, joint_ids=self._leg_dof_ids)
 
     def _update_curriculum(self) -> None:
-        """Update difficulty level based on training progress."""
+        """Continuously interpolate task difficulty from training progress."""
         if not self.cfg.enable_curriculum or self.cfg.curriculum_total_steps <= 0:
             return
-        curriculum_step = int(getattr(self.cfg, "curriculum_start_step", 0)) + self.common_step_counter
+        # common_step_counter is incremented after a policy step. Adding one
+        # here makes the final action of the configured horizon use progress
+        # 1.0 instead of stopping one tick short of the last anchor.
+        curriculum_step = int(getattr(self.cfg, "curriculum_start_step", 0)) + self.common_step_counter + 1
         progress = min(1.0, max(0.0, curriculum_step / self.cfg.curriculum_total_steps))
+        self._apply_curriculum_progress(progress)
 
-        # Difficulty curriculum: evenly split into 5 levels.
-        if progress < 1 / 5:
-            new_level = 1
-        elif progress < 2 / 5:
-            new_level = 2
-        elif progress < 3 / 5:
-            new_level = 3
-        elif progress < 4 / 5:
-            new_level = 4
+    def _apply_curriculum_progress(self, progress: float) -> None:
+        """Apply the linear interpolation between the two surrounding anchors."""
+        progress = min(max(float(progress), 0.0), 1.0)
+        anchor_progress = self._CURRICULUM_ANCHOR_PROGRESS
+        upper_index = next(
+            (index for index, value in enumerate(anchor_progress) if progress <= value),
+            len(anchor_progress) - 1,
+        )
+        lower_index = max(0, upper_index - 1)
+        if upper_index == lower_index:
+            interpolation = 0.0
         else:
-            new_level = 5
+            span = anchor_progress[upper_index] - anchor_progress[lower_index]
+            interpolation = (progress - anchor_progress[lower_index]) / span
 
-        if new_level != self._current_difficulty_level:
-            self._current_difficulty_level = new_level
-            self._apply_difficulty_preset(new_level)
-
-    def _apply_difficulty_preset(self, level: int) -> None:
-        """Apply a validated task/distribution preset without changing mechanics."""
-        preset = self._DIFFICULTY_PRESETS[level]
-        for key, value in preset.items():
+        lower_preset = self._DIFFICULTY_PRESETS[lower_index + 1]
+        upper_preset = self._DIFFICULTY_PRESETS[upper_index + 1]
+        for key, lower_value in lower_preset.items():
+            value = _interpolate_curriculum_value(
+                lower_value, upper_preset[key], interpolation
+            )
             if key.endswith("_range") and isinstance(value, tuple) and len(value) == 2:
                 self._validate_range(key, value)
-        mixture = preset["goal_distance_mixture"]
-        if any(value < 0.0 for value in mixture) or not math.isclose(sum(mixture), 1.0, abs_tol=1e-6):
-            raise ValueError(f"Difficulty {level} goal_distance_mixture must be non-negative and sum to one.")
-        for key, value in preset.items():
             setattr(self.cfg, key, value)
 
-        # A level may toggle pushes on after initialization.  Clear stale
-        # wrenches and schedule from the current per-episode time in that case.
-        if hasattr(self, "_push_forces"):
-            self._push_forces.zero_()
-            self._push_torques.zero_()
-            self._push_end_step.zero_()
-            self._schedule_next_push(self._dr_all_env_ids, self._steps_since_reset)
-        print(f"[Curriculum] Switched to difficulty level {level} at step {self.common_step_counter}")
+        for mixture_name in ("goal_distance_mixture", "goal_chain_distance_mixture"):
+            mixture = getattr(self.cfg, mixture_name)
+            if any(value < 0.0 for value in mixture) or not math.isclose(
+                sum(mixture), 1.0, abs_tol=1e-6
+            ):
+                raise ValueError(f"Interpolated {mixture_name} must be non-negative and sum to one.")
+        self._curriculum_progress = progress
+        self._current_difficulty_level = min(lower_index + 1, 5)
+        if math.isclose(interpolation, 1.0):
+            self._current_difficulty_level = min(upper_index + 1, 5)
+
+    def _apply_difficulty_preset(self, level: int) -> None:
+        """Pin task difficulty to one exact curriculum anchor."""
+        self._apply_curriculum_progress(self._CURRICULUM_ANCHOR_PROGRESS[level - 1])
+        self._current_difficulty_level = level
 
     def _get_observations(self) -> dict:
-        """Build the v2 asymmetric observation contract (56 dimensions)."""
+        """Build the v3 asymmetric observation contract (56 dimensions)."""
         if (
             self._observation_cache is not None
             and self._observation_cache_step == self.common_step_counter
@@ -1653,8 +1737,6 @@ class Go2PendulumEnv(DirectRLEnv):
             # Return a fresh mapping so framework-side replacement of one group
             # (for example an optional noise model) cannot mutate our cache.
             return dict(self._observation_cache)
-
-        self._update_curriculum()
 
         leg_joint_pos = (
             self.robot.data.joint_pos[:, self._leg_dof_ids]
@@ -1797,7 +1879,7 @@ class Go2PendulumEnv(DirectRLEnv):
         critic_obs = self._mirror_observations(critic_obs)
         if policy_obs.shape[1] != 56 or critic_obs.shape[1] != 56:
             raise RuntimeError(
-                f"V2 observation contract must be 56D, got policy={policy_obs.shape[1]}, critic={critic_obs.shape[1]}."
+                f"V3 observation contract must be 56D, got policy={policy_obs.shape[1]}, critic={critic_obs.shape[1]}."
             )
         self._observation_cache = {"policy": policy_obs, "critic": critic_obs}
         self._observation_cache_step = self.common_step_counter
@@ -1822,23 +1904,26 @@ class Go2PendulumEnv(DirectRLEnv):
             position_error = torch.zeros(self.num_envs, device=self.device)
             yaw_error = torch.zeros_like(position_error)
 
+        stand_mask = self._stand_mode.float()
+        locomotion_mask = 1.0 - stand_mask
         body_lin_vel = self.robot.data.root_lin_vel_b
         body_ang_vel = self.robot.data.root_ang_vel_b
         command_lin_error = body_lin_vel[:, :2] - self._actor_command[:, :2]
-        command_lin_reward = torch.exp(
-            -torch.sum(torch.square(command_lin_error), dim=-1)
-            / max(float(self.cfg.command_lin_vel_reward_sigma) ** 2, 1e-6)
+        normalized_lin_error_sq = torch.sum(torch.square(command_lin_error), dim=-1) / max(
+            float(self.cfg.command_lin_vel_cost_normalizer_m_s) ** 2, 1e-6
         )
+        command_lin_cost = torch.clamp(normalized_lin_error_sq, 0.0, 4.0) * locomotion_mask
         command_yaw_error = body_ang_vel[:, 2] - self._actor_command[:, 2]
-        command_yaw_reward = torch.exp(
-            -torch.square(command_yaw_error) / max(float(self.cfg.command_yaw_rate_reward_sigma) ** 2, 1e-6)
+        normalized_yaw_error_sq = torch.square(command_yaw_error) / max(
+            float(self.cfg.command_yaw_rate_cost_normalizer_rad_s) ** 2, 1e-6
         )
+        command_yaw_cost = torch.clamp(normalized_yaw_error_sq, 0.0, 4.0) * locomotion_mask
         goal_position_hold = torch.exp(
             -torch.square(position_error) / max(float(self.cfg.goal_position_hold_reward_sigma) ** 2, 1e-6)
-        ) * self._stand_gate
+        ) * stand_mask
         goal_yaw_hold = torch.exp(
             -torch.square(yaw_error) / max(float(self.cfg.goal_yaw_hold_reward_sigma) ** 2, 1e-6)
-        ) * self._stand_gate
+        ) * stand_mask
         stand_lin_settling = torch.exp(
             -torch.sum(torch.square(command_lin_error), dim=-1)
             / max(float(self.cfg.stand_lin_vel_reward_sigma) ** 2, 1e-6)
@@ -1846,7 +1931,19 @@ class Go2PendulumEnv(DirectRLEnv):
         stand_yaw_settling = torch.exp(
             -torch.square(command_yaw_error) / max(float(self.cfg.stand_yaw_rate_reward_sigma) ** 2, 1e-6)
         )
-        stand_settling = 0.5 * (stand_lin_settling + stand_yaw_settling) * self._stand_gate
+        stand_settling = 0.5 * (stand_lin_settling + stand_yaw_settling) * stand_mask
+
+        raw_goal_progress = self._goal_previous_distance - position_error
+        goal_progress = torch.clamp(
+            raw_goal_progress,
+            -float(self.cfg.progress_reward_clip_m),
+            float(self.cfg.progress_reward_clip_m),
+        ) * locomotion_mask
+        goal_distance_cost = torch.relu(
+            position_error - float(self.cfg.arrival_position_tolerance_m)
+        ) * locomotion_mask
+        locomotion_time_cost = locomotion_mask
+        self._goal_previous_distance.copy_(position_error)
 
         if self.cfg.use_pendulum and self._pendulum_dof_ids.numel() > 0:
             pendulum_pos = self.robot.data.joint_pos[:, self._pendulum_dof_ids]
@@ -1892,7 +1989,7 @@ class Go2PendulumEnv(DirectRLEnv):
         contact_threshold = float(self.cfg.foot_contact_force_threshold_n)
         contact_probability = torch.sigmoid((foot_forces - contact_threshold) / max(0.25 * contact_threshold, 1e-3))
         strict_contact = foot_forces > contact_threshold
-        stand_style_gate = self._stand_gate * recovery_style_gate
+        stand_style_gate = stand_mask * recovery_style_gate
         stand_contacts = torch.mean(contact_probability, dim=-1) * stand_style_gate
 
         foot_height = self.foot_positions_w[:, :, 2] - env_origins[:, 2].unsqueeze(-1)
@@ -1931,6 +2028,8 @@ class Go2PendulumEnv(DirectRLEnv):
             * first_contact.float(),
             dim=-1,
         ) * self._move_gate
+        tracking_quality = torch.exp(-4.0 * (normalized_lin_error_sq + normalized_yaw_error_sq))
+        feet_air_time *= tracking_quality
 
         q = self.robot.data.joint_pos[:, self._leg_dof_ids] - self.robot.data.default_joint_pos[:, self._leg_dof_ids]
         joint_symmetry_terms = torch.stack(
@@ -1976,9 +2075,14 @@ class Go2PendulumEnv(DirectRLEnv):
         dwell_achieved = self._arrival_dwell_steps >= required_dwell_steps
         newly_achieved = dwell_achieved & ~self._current_goal_success_recorded
         self._episode_goal_success_count += newly_achieved.long()
+        successful_env_ids = torch.nonzero(newly_achieved, as_tuple=False).squeeze(-1)
+        if successful_env_ids.numel() > 0:
+            success_classes = self._current_goal_class[successful_env_ids]
+            self._episode_goal_successes_by_class[successful_env_ids, success_classes] += 1
         self._current_goal_success_recorded |= dwell_achieved
         self._episode_arrival_success |= dwell_achieved
         arrival_dwell = dwell_achieved.float()
+        arrival_bonus = newly_achieved.float()
 
         stand_step = self._stand_mode
         all_four_contact = torch.all(strict_contact, dim=-1)
@@ -2002,6 +2106,18 @@ class Go2PendulumEnv(DirectRLEnv):
         self._episode_pendulum_angle_deg_count += 1
         self._episode_pendulum_speed_deg_s_sum += torch.rad2deg(pendulum_speed)
         self._episode_pendulum_speed_deg_s_count += 1
+        self._episode_reward_step_count += 1
+        commanded_speed = torch.linalg.norm(self._actor_command[:, :2], dim=-1)
+        self._episode_commanded_speed_sum += commanded_speed
+        self._episode_radial_speed_sum += raw_goal_progress * locomotion_mask / self.step_dt
+        commanded_motion = (
+            (commanded_speed > 1.0e-4) | (torch.abs(self._actor_command[:, 2]) > 1.0e-4)
+        ) & (~self._stand_mode)
+        self._episode_commanded_motion_steps += commanded_motion.long()
+        actual_motion = (
+            torch.linalg.norm(body_lin_vel[:, :2], dim=-1) > 0.05
+        ) & (~self._stand_mode)
+        self._episode_actual_motion_steps += actual_motion.long()
 
         action_magnitude = torch.sum(torch.square(self.last_action), dim=-1) * self.cfg.action_scale**2
         action_rate = torch.sum(torch.square(self.last_action - self._action_history[:, :, 0]), dim=-1) * (
@@ -2038,8 +2154,8 @@ class Go2PendulumEnv(DirectRLEnv):
 
         dt = self.step_dt
         rewards = {
-            "command_lin_vel": command_lin_reward * self.cfg.command_lin_vel_reward_scale * dt,
-            "command_yaw_rate": command_yaw_reward * self.cfg.command_yaw_rate_reward_scale * dt,
+            "command_lin_vel": command_lin_cost * self.cfg.command_lin_vel_reward_scale * dt,
+            "command_yaw_rate": command_yaw_cost * self.cfg.command_yaw_rate_reward_scale * dt,
             "goal_position_hold": goal_position_hold * self.cfg.goal_position_hold_reward_scale * dt,
             "goal_yaw_hold": goal_yaw_hold * self.cfg.goal_yaw_hold_reward_scale * dt,
             "stand_settling": stand_settling * self.cfg.stand_settling_reward_scale * dt,
@@ -2051,6 +2167,10 @@ class Go2PendulumEnv(DirectRLEnv):
             "pendulum_upright": pendulum_upright * self.cfg.pendulum_upright_reward_scale * dt,
             "pendulum_velocity": pendulum_velocity * self.cfg.pendulum_vel_reward_scale * dt,
             "arrival_dwell": arrival_dwell * self.cfg.arrival_dwell_reward_scale * dt,
+            "arrival_bonus": arrival_bonus * self.cfg.arrival_bonus_reward_scale,
+            "goal_progress": goal_progress * self.cfg.progress_reward_scale,
+            "goal_distance_cost": goal_distance_cost * self.cfg.goal_distance_cost_scale * dt,
+            "locomotion_time_cost": locomotion_time_cost * self.cfg.locomotion_time_cost_scale * dt,
             "action_magnitude": action_magnitude * self.cfg.action_magnitude_reward_scale * dt,
             "action_rate_l2": action_rate * self.cfg.action_rate_reward_scale * dt,
             "action_acc_l2": action_acc * self.cfg.action_acc_reward_scale * dt,
@@ -2089,7 +2209,7 @@ class Go2PendulumEnv(DirectRLEnv):
                     chain_env_ids,
                     base_pos_xy[chain_env_ids],
                     base_yaw[chain_env_ids],
-                    getattr(self.cfg, "goal_chain_distance_mixture", (0.10, 0.20, 0.70)),
+                    getattr(self.cfg, "goal_chain_distance_mixture", (0.10, 0.55, 0.35)),
                     is_chain=True,
                 )
                 self._arrival_dwell_steps[chain_env_ids] = 0
@@ -2170,40 +2290,339 @@ class Go2PendulumEnv(DirectRLEnv):
             pendulum_angle_terminated = self._pendulum_angle_failure_steps >= failure_steps_threshold
             terminated = terminated | pendulum_angle_terminated
 
-        position_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        absolute_position_terminated = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.bool
+        )
+        relative_position_terminated = torch.zeros_like(absolute_position_terminated)
+        goal_no_progress_terminated = torch.zeros_like(absolute_position_terminated)
         if self.target_state is not None:
             env_origins = (
                 self._terrain.env_origins if self._terrain.terrain_origins is not None else self.scene.env_origins
             )
             base_pos_xy = self.robot.data.root_pos_w[:, :2] - env_origins[:, :2]
             position_error = torch.linalg.norm(self.target_state[:, :2] - base_pos_xy, dim=1)
-            if self._position_failure_steps is None:
-                self._position_failure_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
-            position_failing = (position_error > self.cfg.position_tolerance) & termination_allowed
-            self._position_failure_steps = torch.where(
-                position_failing,
-                self._position_failure_steps + 1,
-                torch.zeros_like(self._position_failure_steps),
+            if self._absolute_position_failure_steps is None:
+                self._absolute_position_failure_steps = torch.zeros(
+                    self.num_envs, device=self.device, dtype=torch.long
+                )
+            absolute_position_failing = (
+                position_error > float(self.cfg.absolute_position_divergence_m)
             )
-            position_failure_threshold = max(1, math.ceil(self.cfg.position_terminate_duration_s / self.step_dt))
-            position_terminated = self._position_failure_steps >= position_failure_threshold
-            terminated = terminated | position_terminated
+            self._absolute_position_failure_steps = torch.where(
+                absolute_position_failing,
+                self._absolute_position_failure_steps + 1,
+                torch.zeros_like(self._absolute_position_failure_steps),
+            )
+            absolute_failure_threshold = self._seconds_to_steps(
+                float(self.cfg.absolute_position_divergence_duration_s)
+            )
+            absolute_position_terminated = (
+                self._absolute_position_failure_steps >= absolute_failure_threshold
+            )
+
+            locomotion_goal = self._current_goal_class > 0
+            push_paused = steps_since_reset < self._push_watchdog_pause_until_step
+            exempt_distance = float(self.cfg.goal_watchdog_exempt_distance_m)
+            watchdog_exempt = position_error <= exempt_distance
+            exited_exempt_region = (
+                locomotion_goal
+                & self._goal_watchdog_was_exempt
+                & ~watchdog_exempt
+                & ~push_paused
+            )
+
+            # Inside the arrival neighborhood the watchdog has no stale
+            # deadline. If drift later exits it, start a fresh three-second
+            # window from the exit pose.
+            reset_watchdog = locomotion_goal & watchdog_exempt & ~push_paused
+            self._goal_checkpoint_distance = torch.where(
+                reset_watchdog | exited_exempt_region,
+                position_error,
+                self._goal_checkpoint_distance,
+            )
+            self._goal_best_distance = torch.where(
+                reset_watchdog | exited_exempt_region,
+                position_error,
+                self._goal_best_distance,
+            )
+            self._goal_watchdog_elapsed_steps = torch.where(
+                reset_watchdog | exited_exempt_region,
+                torch.zeros_like(self._goal_watchdog_elapsed_steps),
+                self._goal_watchdog_elapsed_steps,
+            )
+            self._goal_watchdog_first_window = torch.where(
+                exited_exempt_region,
+                torch.zeros_like(self._goal_watchdog_first_window),
+                self._goal_watchdog_first_window,
+            )
+            self._goal_watchdog_was_exempt = torch.where(
+                locomotion_goal & ~push_paused,
+                watchdog_exempt,
+                self._goal_watchdog_was_exempt,
+            )
+
+            watchdog_running = (
+                locomotion_goal
+                & ~watchdog_exempt
+                & ~exited_exempt_region
+                & ~push_paused
+            )
+            self._goal_best_distance = torch.where(
+                watchdog_running,
+                torch.minimum(self._goal_best_distance, position_error),
+                self._goal_best_distance,
+            )
+            self._goal_watchdog_elapsed_steps += watchdog_running.long()
+            initial_window_steps = self._seconds_to_steps(
+                float(self.cfg.goal_watchdog_initial_window_s)
+            )
+            progress_window_steps = self._seconds_to_steps(
+                float(self.cfg.goal_watchdog_progress_window_s)
+            )
+            watchdog_deadline = torch.where(
+                self._goal_watchdog_first_window,
+                torch.full_like(self._goal_watchdog_elapsed_steps, initial_window_steps),
+                torch.full_like(self._goal_watchdog_elapsed_steps, progress_window_steps),
+            )
+            evaluate_progress = watchdog_running & (
+                self._goal_watchdog_elapsed_steps >= watchdog_deadline
+            )
+            required_progress = _required_goal_progress(
+                self._goal_checkpoint_distance, exempt_distance
+            )
+            achieved_progress = self._goal_checkpoint_distance - self._goal_best_distance
+            goal_no_progress_terminated = evaluate_progress & (
+                achieved_progress + 1.0e-6 < required_progress
+            )
+            passed_window = evaluate_progress & ~goal_no_progress_terminated
+            self._goal_checkpoint_distance = torch.where(
+                passed_window,
+                self._goal_best_distance,
+                self._goal_checkpoint_distance,
+            )
+            self._goal_watchdog_elapsed_steps = torch.where(
+                passed_window,
+                torch.zeros_like(self._goal_watchdog_elapsed_steps),
+                self._goal_watchdog_elapsed_steps,
+            )
+            self._goal_watchdog_first_window &= ~passed_window
+
+            relative_position_failing = (
+                locomotion_goal
+                & ~push_paused
+                & (
+                    position_error
+                    > self._goal_initial_distance
+                    + float(self.cfg.relative_position_divergence_margin_m)
+                )
+            )
+            # Preserve rather than clear a partial failure duration while an
+            # injected wrench and its cooldown have the watchdog paused.
+            self._goal_relative_divergence_steps = torch.where(
+                push_paused,
+                self._goal_relative_divergence_steps,
+                torch.where(
+                    relative_position_failing,
+                    self._goal_relative_divergence_steps + 1,
+                    torch.zeros_like(self._goal_relative_divergence_steps),
+                ),
+            )
+            relative_failure_threshold = self._seconds_to_steps(
+                float(self.cfg.relative_position_divergence_duration_s)
+            )
+            relative_position_terminated = (
+                self._goal_relative_divergence_steps >= relative_failure_threshold
+            )
+            terminated |= (
+                absolute_position_terminated
+                | relative_position_terminated
+                | goal_no_progress_terminated
+            )
 
         self._base_contact_terminated = cstr_termination_contacts
         self._base_height_terminated = cstr_base_height_min
         self._base_tilt_terminated = base_tilt_terminated
         self._pendulum_contact_terminated = pendulum_contact
         self._pendulum_angle_terminated = pendulum_angle_terminated
-        self._position_terminated = position_terminated
+        self._absolute_position_terminated = absolute_position_terminated
+        self._relative_position_terminated = relative_position_terminated
+        self._goal_no_progress_terminated = goal_no_progress_terminated
         self._steps_since_reset += 1
 
         return terminated, time_out
+
+    def _log_and_clear_episode(self, env_ids: torch.Tensor) -> None:
+        """Log the completed episode before reset mutates task or simulator state."""
+        log = {}
+        episode_duration = torch.clamp(
+            self._episode_reward_step_count[env_ids].float() * self.step_dt,
+            min=self.step_dt,
+        )
+        for key in self._episode_sums:
+            episode_returns = self._episode_sums[key][env_ids]
+            # Preserve the original dashboard series and add unambiguous
+            # return/rate variants normalized by each episode's true duration.
+            log["Episode_Reward/" + key] = torch.mean(episode_returns) / self.max_episode_length_s
+            log["Episode_RewardReturn/" + key] = torch.mean(episode_returns)
+            log["Episode_RewardRate/" + key] = torch.mean(episode_returns / episode_duration)
+            self._episode_sums[key][env_ids] = 0.0
+
+        base_contact_resets = self._base_contact_terminated[env_ids] & self.reset_terminated[env_ids]
+        base_height_resets = self._base_height_terminated[env_ids] & self.reset_terminated[env_ids]
+        base_tilt_resets = self._base_tilt_terminated[env_ids] & self.reset_terminated[env_ids]
+        pendulum_contact_resets = self._pendulum_contact_terminated[env_ids] & self.reset_terminated[env_ids]
+        pendulum_angle_resets = self._pendulum_angle_terminated[env_ids] & self.reset_terminated[env_ids]
+        absolute_position_resets = (
+            self._absolute_position_terminated[env_ids] & self.reset_terminated[env_ids]
+        )
+        relative_position_resets = (
+            self._relative_position_terminated[env_ids] & self.reset_terminated[env_ids]
+        )
+        no_progress_resets = (
+            self._goal_no_progress_terminated[env_ids] & self.reset_terminated[env_ids]
+        )
+        any_labeled_reset = (
+            base_contact_resets
+            | base_height_resets
+            | base_tilt_resets
+            | pendulum_contact_resets
+            | pendulum_angle_resets
+            | absolute_position_resets
+            | relative_position_resets
+            | no_progress_resets
+        )
+        log["Episode_Termination/base_contact"] = torch.count_nonzero(base_contact_resets).item()
+        log["Episode_Termination/base_height"] = torch.count_nonzero(base_height_resets).item()
+        log["Episode_Termination/base_tilt"] = torch.count_nonzero(base_tilt_resets).item()
+        log["Episode_Termination/pendulum_contact"] = torch.count_nonzero(pendulum_contact_resets).item()
+        log["Episode_Termination/pendulum_angle"] = torch.count_nonzero(pendulum_angle_resets).item()
+        log["Episode_Termination/absolute_position_divergence"] = torch.count_nonzero(
+            absolute_position_resets
+        ).item()
+        log["Episode_Termination/relative_position_divergence"] = torch.count_nonzero(
+            relative_position_resets
+        ).item()
+        log["Episode_Termination/no_goal_progress"] = torch.count_nonzero(no_progress_resets).item()
+        log["Episode_Termination/other"] = torch.count_nonzero(
+            self.reset_terminated[env_ids] & ~any_labeled_reset
+        ).item()
+        log["Episode_Termination/time_out"] = torch.count_nonzero(self.reset_time_outs[env_ids]).item()
+
+        steps = torch.clamp(self._episode_base_height_count[env_ids], min=1).float()
+        log["Episode_Metric/mean_base_height"] = torch.mean(
+            self._episode_base_height_sum[env_ids] / steps
+        ).item()
+        base_tilt_steps = torch.clamp(self._episode_base_tilt_deg_count[env_ids], min=1).float()
+        log["Episode_Metric/mean_base_tilt_deg"] = torch.mean(
+            self._episode_base_tilt_deg_sum[env_ids] / base_tilt_steps
+        ).item()
+        pendulum_steps = torch.clamp(self._episode_pendulum_angle_deg_count[env_ids], min=1).float()
+        log["Episode_Metric/mean_pendulum_angle_deg"] = torch.mean(
+            self._episode_pendulum_angle_deg_sum[env_ids] / pendulum_steps
+        ).item()
+        pendulum_speed_steps = torch.clamp(
+            self._episode_pendulum_speed_deg_s_count[env_ids], min=1
+        ).float()
+        log["Episode_Metric/mean_pendulum_speed_deg_s"] = torch.mean(
+            self._episode_pendulum_speed_deg_s_sum[env_ids] / pendulum_speed_steps
+        ).item()
+        log["Episode_Metric/arrival_success_rate"] = torch.mean(
+            self._episode_arrival_success[env_ids].float()
+        ).item()
+        log["Episode_Metric/success_count"] = torch.mean(
+            self._episode_goal_success_count[env_ids].float()
+        ).item()
+
+        assignments = torch.sum(self._episode_goal_assignments[env_ids], dim=0)
+        successes = torch.sum(self._episode_goal_successes_by_class[env_ids], dim=0)
+        total_assignments = torch.clamp(torch.sum(assignments), min=1).float()
+        for class_index, class_name in enumerate(("stand", "short", "walk")):
+            log[f"Episode_Metric/assigned_goal_fraction_{class_name}"] = (
+                assignments[class_index].float() / total_assignments
+            ).item()
+            class_assignments = torch.clamp(assignments[class_index], min=1).float()
+            log[f"Episode_Metric/arrival_success_rate_{class_name}"] = (
+                successes[class_index].float() / class_assignments
+            ).item()
+
+        if self.target_state is not None:
+            env_origins = (
+                self._terrain.env_origins
+                if self._terrain.terrain_origins is not None
+                else self.scene.env_origins
+            )
+            final_distance = torch.linalg.norm(
+                self.target_state[env_ids, :2]
+                - (self.robot.data.root_pos_w[env_ids, :2] - env_origins[env_ids, :2]),
+                dim=-1,
+            )
+            initial_distance = self._goal_initial_distance[env_ids]
+            best_distance = self._goal_best_distance[env_ids]
+            normalization = torch.clamp(
+                initial_distance - float(self.cfg.arrival_position_tolerance_m), min=1.0e-3
+            )
+            normalized_progress = (initial_distance - final_distance) / normalization
+            log["Episode_Metric/goal_initial_distance_m"] = torch.mean(initial_distance).item()
+            log["Episode_Metric/goal_final_distance_m"] = torch.mean(final_distance).item()
+            log["Episode_Metric/goal_best_distance_m"] = torch.mean(best_distance).item()
+            locomotion_goals = self._current_goal_class[env_ids] > 0
+            log["Episode_Metric/normalized_distance_progress"] = (
+                torch.mean(normalized_progress[locomotion_goals]).item()
+                if torch.any(locomotion_goals)
+                else 0.0
+            )
+
+        reward_steps = torch.clamp(self._episode_reward_step_count[env_ids], min=1).float()
+        log["Episode_Metric/mean_commanded_speed_m_s"] = torch.mean(
+            self._episode_commanded_speed_sum[env_ids] / reward_steps
+        ).item()
+        log["Episode_Metric/mean_achieved_radial_speed_m_s"] = torch.mean(
+            self._episode_radial_speed_sum[env_ids] / reward_steps
+        ).item()
+        log["Episode_Metric/commanded_motion_fraction"] = torch.mean(
+            self._episode_commanded_motion_steps[env_ids].float() / reward_steps
+        ).item()
+        log["Episode_Metric/actual_motion_fraction"] = torch.mean(
+            self._episode_actual_motion_steps[env_ids].float() / reward_steps
+        ).item()
+        stand_steps = torch.clamp(self._episode_stand_steps[env_ids], min=1).float()
+        log["Episode_Metric/four_contact_fraction_in_stand"] = torch.mean(
+            self._episode_four_contact_sum[env_ids] / stand_steps
+        ).item()
+        log["Episode_Metric/stand_foot_lift_events"] = torch.mean(
+            self._episode_foot_lift_events[env_ids].float()
+        ).item()
+        log["Episode_Metric/curriculum_progress"] = self._curriculum_progress
+
+        self._episode_reward_step_count[env_ids] = 0
+        self._episode_base_height_sum[env_ids] = 0.0
+        self._episode_base_height_count[env_ids] = 0
+        self._episode_base_tilt_deg_sum[env_ids] = 0.0
+        self._episode_base_tilt_deg_count[env_ids] = 0
+        self._episode_pendulum_angle_deg_sum[env_ids] = 0.0
+        self._episode_pendulum_angle_deg_count[env_ids] = 0
+        self._episode_pendulum_speed_deg_s_sum[env_ids] = 0.0
+        self._episode_pendulum_speed_deg_s_count[env_ids] = 0
+        self._episode_arrival_success[env_ids] = False
+        self._episode_goal_success_count[env_ids] = 0
+        self._episode_goal_assignments[env_ids] = 0
+        self._episode_goal_successes_by_class[env_ids] = 0
+        self._episode_commanded_speed_sum[env_ids] = 0.0
+        self._episode_radial_speed_sum[env_ids] = 0.0
+        self._episode_commanded_motion_steps[env_ids] = 0
+        self._episode_actual_motion_steps[env_ids] = 0
+        self._episode_four_contact_sum[env_ids] = 0.0
+        self._episode_stand_steps[env_ids] = 0
+        self._episode_foot_lift_events[env_ids] = 0
+        self.extras["log"] = log
 
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self.robot._ALL_INDICES
         if not torch.is_tensor(env_ids):
             env_ids = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+
+        self._log_and_clear_episode(env_ids)
 
         # A reset changes physical/sensor/task state without necessarily
         # advancing common_step_counter (for example an explicit Gym reset).
@@ -2236,6 +2655,7 @@ class Go2PendulumEnv(DirectRLEnv):
         self._arrival_dwell_steps[env_ids] = 0
         self._current_goal_success_recorded[env_ids] = False
         self._previous_stand_foot_lift[env_ids] = False
+        self._push_watchdog_pause_until_step[env_ids] = 0
 
         if bool(getattr(self.cfg, "enable_episode_mirroring", True)):
             self._episode_mirrored[env_ids] = (
@@ -2279,8 +2699,8 @@ class Go2PendulumEnv(DirectRLEnv):
             self._base_height_failure_steps[env_ids] = 0
         if self._pendulum_angle_failure_steps is not None:
             self._pendulum_angle_failure_steps[env_ids] = 0
-        if self._position_failure_steps is not None:
-            self._position_failure_steps[env_ids] = 0
+        if self._absolute_position_failure_steps is not None:
+            self._absolute_position_failure_steps[env_ids] = 0
 
         num_reset_envs = env_ids.shape[0]
         # Reset robot state.
@@ -2370,6 +2790,9 @@ class Go2PendulumEnv(DirectRLEnv):
             self.cfg.goal_distance_mixture,
             is_chain=False,
         )
+        # The old episode was logged and cleared before this target was
+        # sampled, so its assignment belongs exclusively to the new episode.
+        self._episode_goal_assignments[env_ids, reset_goal_class] += 1
         # Class-0 is explicitly a planted reset. Seed the hysteresis latch so
         # bounded mocap error near the enter threshold cannot relabel it as a
         # low-speed locomotion sample on the first policy tick.
@@ -2410,90 +2833,6 @@ class Go2PendulumEnv(DirectRLEnv):
         self._imu_sensor.reset(env_ids)
 
         self._visualize_target_markers()
-
-        # Logging
-        extras = dict()
-        for key in self._episode_sums:
-            episodic_sum_avg = torch.mean(self._episode_sums[key][env_ids])
-            extras["Episode_Reward/" + key] = episodic_sum_avg / self.max_episode_length_s
-            self._episode_sums[key][env_ids] = 0.0
-
-        self.extras["log"] = dict()
-        self.extras["log"].update(extras)
-
-        extras = dict()
-        base_contact_resets = self._base_contact_terminated[env_ids] & self.reset_terminated[env_ids]
-        base_height_resets = self._base_height_terminated[env_ids] & self.reset_terminated[env_ids]
-        base_tilt_resets = self._base_tilt_terminated[env_ids] & self.reset_terminated[env_ids]
-        pendulum_contact_resets = self._pendulum_contact_terminated[env_ids] & self.reset_terminated[env_ids]
-        pendulum_angle_resets = self._pendulum_angle_terminated[env_ids] & self.reset_terminated[env_ids]
-        position_resets = self._position_terminated[env_ids] & self.reset_terminated[env_ids]
-        any_labeled_reset = (
-            base_contact_resets
-            | base_height_resets
-            | base_tilt_resets
-            | pendulum_contact_resets
-            | pendulum_angle_resets
-            | position_resets
-        )
-        extras["Episode_Termination/base_contact"] = torch.count_nonzero(base_contact_resets).item()
-        extras["Episode_Termination/base_height"] = torch.count_nonzero(base_height_resets).item()
-        extras["Episode_Termination/base_tilt"] = torch.count_nonzero(base_tilt_resets).item()
-        extras["Episode_Termination/pendulum_contact"] = torch.count_nonzero(pendulum_contact_resets).item()
-        extras["Episode_Termination/pendulum_angle"] = torch.count_nonzero(pendulum_angle_resets).item()
-        extras["Episode_Termination/position_error"] = torch.count_nonzero(position_resets).item()
-        extras["Episode_Termination/other"] = torch.count_nonzero(
-            self.reset_terminated[env_ids] & ~any_labeled_reset
-        ).item()
-        extras["Episode_Termination/time_out"] = torch.count_nonzero(self.reset_time_outs[env_ids]).item()
-        steps = torch.clamp(self._episode_base_height_count[env_ids], min=1).to(dtype=torch.float)
-        mean_base_height = torch.mean(self._episode_base_height_sum[env_ids] / steps)
-        extras["Episode_Metric/mean_base_height"] = mean_base_height.item()
-        self._episode_base_height_sum[env_ids] = 0.0
-        self._episode_base_height_count[env_ids] = 0
-        base_tilt_steps = torch.clamp(self._episode_base_tilt_deg_count[env_ids], min=1).to(dtype=torch.float)
-        mean_base_tilt_deg = torch.mean(self._episode_base_tilt_deg_sum[env_ids] / base_tilt_steps)
-        extras["Episode_Metric/mean_base_tilt_deg"] = mean_base_tilt_deg.item()
-        self._episode_base_tilt_deg_sum[env_ids] = 0.0
-        self._episode_base_tilt_deg_count[env_ids] = 0
-        pendulum_steps = torch.clamp(self._episode_pendulum_angle_deg_count[env_ids], min=1).to(dtype=torch.float)
-        mean_pendulum_angle_deg = torch.mean(self._episode_pendulum_angle_deg_sum[env_ids] / pendulum_steps)
-        extras["Episode_Metric/mean_pendulum_angle_deg"] = mean_pendulum_angle_deg.item()
-        self._episode_pendulum_angle_deg_sum[env_ids] = 0.0
-        self._episode_pendulum_angle_deg_count[env_ids] = 0
-        pendulum_speed_steps = torch.clamp(self._episode_pendulum_speed_deg_s_count[env_ids], min=1).to(
-            dtype=torch.float
-        )
-        mean_pendulum_speed_deg_s = torch.mean(self._episode_pendulum_speed_deg_s_sum[env_ids] / pendulum_speed_steps)
-        extras["Episode_Metric/mean_pendulum_speed_deg_s"] = mean_pendulum_speed_deg_s.item()
-        self._episode_pendulum_speed_deg_s_sum[env_ids] = 0.0
-        self._episode_pendulum_speed_deg_s_count[env_ids] = 0
-        extras["Episode_Metric/arrival_success_rate"] = torch.mean(
-            self._episode_arrival_success[env_ids].float()
-        ).item()
-        extras["Episode_Metric/success_count"] = torch.mean(
-            self._episode_goal_success_count[env_ids].float()
-        ).item()
-        stand_steps = torch.clamp(self._episode_stand_steps[env_ids], min=1).float()
-        extras["Episode_Metric/four_contact_fraction_in_stand"] = torch.mean(
-            self._episode_four_contact_sum[env_ids] / stand_steps
-        ).item()
-        extras["Episode_Metric/stand_foot_lift_events"] = torch.mean(
-            self._episode_foot_lift_events[env_ids].float()
-        ).item()
-        self._episode_arrival_success[env_ids] = False
-        self._episode_goal_success_count[env_ids] = 0
-        self._episode_four_contact_sum[env_ids] = 0.0
-        self._episode_stand_steps[env_ids] = 0
-        self._episode_foot_lift_events[env_ids] = 0
-        if self.cfg.enable_curriculum and self.cfg.curriculum_total_steps > 0:
-            curriculum_step = int(getattr(self.cfg, "curriculum_start_step", 0)) + self.common_step_counter
-            extras["Episode_Metric/curriculum_progress"] = min(
-                1.0, max(0.0, curriculum_step / self.cfg.curriculum_total_steps)
-            )
-        else:
-            extras["Episode_Metric/curriculum_progress"] = 0.0
-        self.extras["log"].update(extras)
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # set visibility of markers

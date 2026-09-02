@@ -14,19 +14,20 @@ The environment is registered with two RSL-RL policy variants:
 - RSL-RL and SKRL training/play entry points
 - Utility scripts for env listing and zero/random-action smoke tests
 
-## Policy Contract v2
+## Policy Contract v3
 
-Policy contract v2 keeps the 56-D actor input and 12-D action dimensions, but changes their semantics and the action pipeline. It is intentionally checkpoint-incompatible with earlier runs. Start new MLP and GRU runs; do not resume a v1 checkpoint.
+Policy contract v3 retains the 56-D actor input and 12-D action dimensions, but changes the navigation-command semantics and training objective. It is intentionally checkpoint-incompatible with both v1 and v2. Start new MLP and GRU runs; do not resume an older checkpoint.
 
-The main v2 changes are:
+The main v3 changes are:
 
-- The actor receives deployable locomotion commands plus bounded planted-stance correction cues instead of privileged raw goal error. The asymmetric critic retains clean simulator state and raw goal error.
-- A stateful goal controller uses arrival hysteresis to switch between moving and planted standing without chattering around the goal.
-- The gait clock is command-dependent and exposes sine, cosine, move, and stand channels. Gait phase freezes and all four feet are requested in contact while standing.
-- Actor base and pendulum velocities use the same 50 Hz finite differences expected from motion capture at deployment.
-- The delivered-action observation is taken after clipping, transport randomization, low-pass filtering, joint-limit clamping, and target slew limiting.
-- MLP and GRU observation normalization is enabled and exported as part of ONNX.
-- Goal/reset mixtures retain planted examples while adding sustained walking and recovery cases; domain-randomization strength is mixed across nominal, uniform, and maximum samples.
+- Forward speed is no longer attenuated by the near-goal yaw blend. The blend now only transitions the yaw controller from path heading to final heading.
+- Locomotion uses normalized command-error costs, signed goal progress, residual-distance and elapsed-time costs, and a one-time settled-arrival bonus. A stationary policy no longer receives free positive command reward.
+- Stand-only rewards use the binary stand latch, and positive air-time reward is suppressed unless the robot actually tracks the commanded motion.
+- A no-progress watchdog terminates locomotion goals that stall, while separate relative- and absolute-divergence guards catch motion away from the target.
+- A smoothly interpolated mixed curriculum includes walking goals from iteration zero and increases their fraction, bearing range, yaw range, pendulum difficulty, randomization, and pushes over training.
+- The established sim-to-real observation, finite-difference mocap, gait-clock, planted-stance, action-delivery, and ONNX interfaces remain in place.
+
+The Gym suffix and policy-contract version are independent. `Template-Go2-Pendulum-Direct-v0` and `Template-Go2-Pendulum-GRU-Direct-v0` retain `-v0` because that is the stable Gym registration/API identifier. Policy v3 is set by `POLICY_CONTRACT_VERSION` in the environment config, saved in `params/env.yaml`, exported in `policy_contract.yaml`, and separated operationally by the `_v3` RSL-RL experiment directories.
 
 > **ROS 2 scope:** this repository trains and exports the policy. No files in `go2_pendulum_ros2` are modified here. The deployment section below is an implementation contract for a separate ROS 2 change.
 
@@ -59,13 +60,13 @@ Verify that the task is registered:
 python scripts/list_envs.py
 ```
 
-Train a fresh v2 MLP policy with RSL-RL:
+Train a fresh v3 MLP policy with RSL-RL:
 
 ```bash
 python scripts/rsl_rl/train.py --task=Template-Go2-Pendulum-Direct-v0 --headless
 ```
 
-Train a fresh v2 GRU-MLP policy with RSL-RL:
+Train a fresh v3 GRU-MLP policy with RSL-RL:
 
 ```bash
 python scripts/rsl_rl/train.py --task=Template-Go2-Pendulum-GRU-Direct-v0 --headless
@@ -73,10 +74,10 @@ python scripts/rsl_rl/train.py --task=Template-Go2-Pendulum-GRU-Direct-v0 --head
 
 The default output roots are:
 
-- MLP: `logs/rsl_rl/go2_pendulum_direct_v2/`
-- GRU: `logs/rsl_rl/go2_pendulum_gru_direct_v2/`
+- MLP: `logs/rsl_rl/go2_pendulum_direct_v3/`
+- GRU: `logs/rsl_rl/go2_pendulum_gru_direct_v3/`
 
-MLP and GRU checkpoints are mutually incompatible. Both are also incompatible with policy contract v1. Resume only from a v2 checkpoint with the same architecture and observation contract.
+MLP and GRU checkpoints are mutually incompatible. Policy v1 and v2 checkpoints are also incompatible with v3. Resume only from a v3 checkpoint with the same architecture and observation contract.
 
 Play and export a trained MLP checkpoint:
 
@@ -98,9 +99,9 @@ python scripts/rsl_rl/play.py \
   --headless
 ```
 
-`play.py` defaults to a canonical, deterministic `nominal` profile at difficulty 5. Use `--eval-profile randomized` for the in-distribution randomization envelope or `--eval-profile stress` for held-out 1.5x DR and 1.25x push tests; select another fixed level with `--difficulty 1` through `5`. Evaluation disables episode mirroring and training-only goal chaining, so each environment measures full-horizon convergence and holding on one fixed goal in the deployment coordinate convention.
+`play.py` defaults to a canonical, deterministic `nominal` profile at curriculum anchor 5 with the anchor's mixed reset distribution. Use `--goal-profile stand`, `short`, or `walk` to isolate one goal class, `--eval-profile randomized` for the in-distribution randomization envelope, or `--eval-profile stress` for held-out 1.5x DR and 1.25x push tests. `--difficulty 1` through `5` maps to the five curriculum anchors. Evaluation disables episode mirroring and training-only goal chaining, so each environment measures full-horizon convergence and holding on one fixed goal.
 
-Playing, resuming, or exporting also verifies `params/env.yaml` beside the checkpoint. A missing or non-v2 `policy_contract_version` is rejected even when the old network has the same 56-input/12-output shape.
+Playing, resuming, or exporting also verifies `params/env.yaml` beside the checkpoint. A missing or non-v3 `policy_contract_version` is rejected even when an older network has the same 56-input/12-output shape.
 
 `play.py` writes the deployment artifacts beside the checkpoint under `exported/`:
 
@@ -110,7 +111,7 @@ Playing, resuming, or exporting also verifies `params/env.yaml` beside the check
 
 The YAML contract records the version, exact observation layout, joint order, navigation/gait/action constants, whether normalization is embedded, and the MLP or GRU ONNX tensor signatures. Treat it as the machine-readable source of truth shipped with the model.
 
-The commands above use the default `nominal` evaluation profile at difficulty level 5. Before deployment, repeat evaluation across the supported profiles, for example:
+The commands above use the default nominal/mixed evaluation at anchor 5. Evaluate goal classes separately before deployment, for example:
 
 ```bash
 python scripts/rsl_rl/play.py \
@@ -119,10 +120,11 @@ python scripts/rsl_rl/play.py \
   --num_envs=64 \
   --headless \
   --eval-profile=randomized \
-  --difficulty=5
+  --difficulty=5 \
+  --goal-profile=walk
 ```
 
-`--eval-profile` accepts `nominal`, `randomized`, or `stress`; `--difficulty` accepts 1 through 5. Use nominal for deterministic regression, randomized for in-distribution robustness, and stress for held-out robustness. Export is performed by the same `play.py` invocation.
+`--eval-profile` accepts `nominal`, `randomized`, or `stress`; `--goal-profile` accepts `mixed`, `stand`, `short`, or `walk`; and `--difficulty` accepts 1 through 5. Use nominal for deterministic regression, randomized for in-distribution robustness, and stress for held-out robustness. Export is performed by the same `play.py` invocation.
 
 Run quick smoke tests:
 
@@ -138,21 +140,32 @@ python scripts/skrl/train.py --task=Template-Go2-Pendulum-Direct-v0 --headless
 python scripts/skrl/play.py --task=Template-Go2-Pendulum-Direct-v0 --num_envs=16
 ```
 
-The v2 ONNX and `policy_contract.yaml` deployment path documented below is the RSL-RL `play.py` export path.
+The v3 ONNX and `policy_contract.yaml` deployment path documented below is the RSL-RL `play.py` export path.
 
-## V2 Training Behavior
+## V3 Training Behavior
 
-The two task IDs use one environment and differ only in policy architecture. Important v2 behavior lives in [go2_pendulum_env_cfg.py](source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/go2_pendulum_env_cfg.py) and [go2_pendulum_env.py](source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/go2_pendulum_env.py).
+The two task IDs use one environment and differ only in policy architecture. Important v3 behavior lives in [go2_pendulum_env_cfg.py](source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/go2_pendulum_env_cfg.py) and [go2_pendulum_env.py](source/go2_pendulum/go2_pendulum/tasks/direct/go2_pendulum/go2_pendulum_env.py).
 
-- The rollout curriculum duration is derived from the final `max_iterations * num_steps_per_env` after CLI overrides, so the configured run reaches the final curriculum level.
-- Reset sampling mixes planted, short-range, walking, and pendulum-recovery cases instead of replacing all easy cases at high difficulty. Goals are anchored to the final perturbed base pose; desired yaw is sampled as an offset from that base yaw. Planted targets use a dedicated `[-2, 2] deg` yaw offset that is safely inside the stand-entry tolerance.
-- Training chains goals without resetting the robot or policy state: after the 1 s arrival dwell and another 1 s continuous planted hold, the settled environment receives a new target anchored to its current pose. The chain mixture is 10% planted, 20% short, and 70% walking; recurrent state, action/filter history, gait phase, physics, and domain randomization remain continuous. `play.py` disables chaining for fixed-goal evaluation.
-- Each reset selects nominal, uniformly randomized, or maximum-randomization conditions. The default fractions are 20%, 70%, and 10%; the initial domain-randomization scale is 0.25 and increases with curriculum.
-- External pushes are enabled at the intended later difficulties. Position termination is only a 2.5 m divergence guard, not an arrival definition.
-- Command tracking remains active at every command magnitude, avoiding a low-speed reward dead zone near the goal. In stand, settling tracks the bounded correction cue while four-foot contact, nominal foot placement, and left/right symmetry keep the gait planted.
+- The rollout curriculum duration is derived from the final `max_iterations * num_steps_per_env` after CLI overrides. Difficulty values are linearly interpolated between progress anchors at 0.00, 0.20, 0.45, 0.70, and 1.00 instead of changing abruptly.
+- Goal distance ranges remain fixed: stand is 0-0.05 m, short is 0.10-0.35 m, and walk is 0.35-1.50 m. Goal bearing is sampled relative to the current base yaw, initially within +/-45 degrees and eventually over the full circle.
+- Training chains goals without resetting the robot or policy state after the settled-arrival dwell and planted hold. Recurrent state, action/filter history, gait phase, physics, and domain randomization remain continuous. `play.py` disables chaining for fixed-goal evaluation.
+- Every locomotion goal starts a progress watchdog. It permits 4 s for initial progress, then requires further best-distance improvement every 3 s. At each checkpoint distance `rho_checkpoint`, the required improvement is `min(0.08, max(0.025, 0.20*(rho_checkpoint - 0.05)), rho_checkpoint - 0.08)` meters. The watchdog is disabled inside 0.08 m and paused during a scripted push plus 0.5 s afterward.
+- The current 2.5 m limit remains an absolute arena-divergence guard. A separate guard terminates when distance stays more than 0.35 m above the goal's initial distance for 0.5 s. No-progress, relative-divergence, and absolute-divergence causes are logged separately.
+- Locomotion command tracking is a zero-at-correct normalized cost rather than a positive Gaussian. Goal progress, remaining distance, elapsed locomotion time, and settled arrival directly determine whether walking is worthwhile. Stand settling, contact, foot-lift, and symmetry rewards apply only while the binary stand latch is active.
+- Each reset still selects nominal, uniformly randomized, or maximum-randomization conditions. The default fractions are 20%, 70%, and 10%; robustness remains at 0.25 scale through the 0.20 curriculum anchor before increasing.
 - Gait air time is consistent with the commanded frequency and duty factor. Contact tracking uses a 5 N threshold, 0.08 m swing clearance, and 0.02 m stance height.
 - Mirrored episodes swap left/right observations and actions with the appropriate sign changes, discouraging a permanently preferred side while preserving valid turning.
-- PPO clips normalized actions to `[-2, 2]`, enables actor/critic observation normalization, and uses separate v2 experiment directories.
+- PPO clips normalized actions to `[-2, 2]`, enables actor/critic observation normalization, and uses separate v3 experiment directories.
+
+The curriculum anchors are:
+
+| Progress | Reset stand/short/walk | Chain stand/short/walk | Relative bearing | Goal yaw | Pendulum max | DR | Push XY |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0.00 | 50/40/10 | 10/55/35 | +/-45 deg | +/-10 deg | 3 deg | 0.25 | off |
+| 0.20 | 35/40/25 | 10/40/50 | +/-75 deg | +/-20 deg | 3 deg | 0.25 | off |
+| 0.45 | 25/35/40 | 10/30/60 | +/-120 deg | +/-45 deg | 5 deg | 0.50 | +/-10 N |
+| 0.70 | 20/25/55 | 10/20/70 | +/-180 deg | +/-75 deg | 7 deg | 0.75 | +/-20 N |
+| 1.00 | 20/20/60 | 10/20/70 | +/-180 deg | +/-90 deg | 10 deg | 1.00 | +/-40 N |
 
 The randomized ranges are placeholders until they can be calibrated from real ROS bags. Keep nominal samples in every curriculum level; simply maximizing every randomization usually degrades precise standing and goal convergence.
 
@@ -216,7 +229,7 @@ max_forward_velocity = 0.6       # m/s
 max_yaw_rate = 1.2              # rad/s
 ```
 
-Define a smooth navigation blend that is zero at 0.05 m and one at 0.20 m:
+Define a smooth navigation blend that is zero at 0.05 m and one at 0.20 m. In v3 this blend applies only to the yaw transition:
 
 ```text
 u = clamp((rho - 0.05) / (0.20 - 0.05), 0, 1)
@@ -227,12 +240,12 @@ yaw_final = clamp(k_final_yaw*goal_yaw_error, -1.2, 1.2)
 yaw_rate_command = blend*yaw_nav + (1 - blend)*yaw_final
 
 forward_velocity_command =
-    clamp(k_rho*rho, 0, 0.6) * max(cos(alpha), 0) * blend
+    clamp(k_rho*rho, 0, 0.6) * max(cos(alpha), 0)
 
 locomotion_command = [forward_velocity_command, 0, yaw_rate_command]
 ```
 
-Also set forward velocity explicitly to zero when `abs(alpha) >= pi/2`. This lets the robot turn before walking when the goal lies behind it.
+Also set forward velocity explicitly to zero when `abs(alpha) >= pi/2`. This lets the robot turn before walking when the goal lies behind it. Do not multiply forward speed by `blend`: at an aligned goal 0.10 m away, v3 commands 0.15 m/s rather than attenuating the command near the stand boundary.
 
 Maintain one latched `stand_mode` state:
 
@@ -288,7 +301,7 @@ Training randomizes initial phase uniformly. The gait is a diagonal trot: FL/RR 
 
 ## Motion-Capture and Finite-Difference Contract
 
-Policy contract v2 intentionally does not use a Savitzky-Golay filter. The following paths are relative to the `src/go2_pendulum/` ROS package root. The separate `go2_pendulum_ros2` implementation must remove Savgol smoothing and differentiation from both:
+Policy contract v3 intentionally does not use a Savitzky-Golay filter. The following paths are relative to the `src/go2_pendulum/` ROS package root. The separate `go2_pendulum_ros2` implementation must remove Savgol smoothing and differentiation from both:
 
 - `go2_bridge/scripts/go2_bridge_node.py`
 - `go2_bridge/scripts/go2_bridge_passive_node.py`

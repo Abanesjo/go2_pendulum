@@ -16,8 +16,8 @@ from isaaclab.app import AppLauncher
 import cli_args  # isort: skip
 
 # add argparse arguments
-parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
-parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
+parser = argparse.ArgumentParser(description="Play and export an RSL-RL agent.")
+parser.add_argument("--video", action="store_true", default=False, help="Record a video during evaluation.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
@@ -45,7 +45,13 @@ parser.add_argument(
     type=int,
     choices=range(1, 6),
     default=5,
-    help="Force one curriculum difficulty level during evaluation (default: 5).",
+    help="Force one curriculum anchor during evaluation (default: 5).",
+)
+parser.add_argument(
+    "--goal-profile",
+    choices=("mixed", "stand", "short", "walk"),
+    default="mixed",
+    help="Evaluate the anchor's mixed distribution or force one reset goal class.",
 )
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
@@ -103,6 +109,11 @@ def _apply_evaluation_profile(env_cfg: DirectRLEnvCfg) -> None:
 
     env_cfg.enable_curriculum = False
     env_cfg.difficulty_override = args_cli.difficulty
+    if not hasattr(env_cfg, "goal_profile_override"):
+        raise AttributeError(
+            "This task does not expose goal_profile_override, which is required by the v3 evaluation interface."
+        )
+    env_cfg.goal_profile_override = args_cli.goal_profile
     # Evaluation should use the canonical deployment coordinate system. The
     # episode-level reflection remains a training augmentation.
     if hasattr(env_cfg, "enable_episode_mirroring"):
@@ -132,7 +143,7 @@ def _apply_evaluation_profile(env_cfg: DirectRLEnvCfg) -> None:
 
     print(
         f"[INFO] Evaluation profile: {args_cli.eval_profile}; "
-        f"forced difficulty: {args_cli.difficulty}."
+        f"goal profile: {args_cli.goal_profile}; forced difficulty anchor: {args_cli.difficulty}."
     )
 
 
@@ -142,7 +153,7 @@ def _validate_checkpoint_contract(checkpoint_path: str, expected_version: str) -
     if not os.path.isfile(env_metadata_path):
         raise RuntimeError(
             "Cannot verify the checkpoint policy contract because its params/env.yaml is missing: "
-            f"{env_metadata_path}. Contract-v1 checkpoints must not be played or exported as v2."
+            f"{env_metadata_path}. Older checkpoints must not be played or exported under the current contract."
         )
 
     saved_version = None
@@ -154,7 +165,8 @@ def _validate_checkpoint_contract(checkpoint_path: str, expected_version: str) -
     if saved_version != expected_version:
         raise RuntimeError(
             f"Checkpoint policy contract mismatch: expected '{expected_version}', found "
-            f"'{saved_version or 'missing'}' in {env_metadata_path}. Use a v2 checkpoint."
+            f"'{saved_version or 'missing'}' in {env_metadata_path}. "
+            "Use a checkpoint trained under the current contract."
         )
 
 
@@ -190,7 +202,9 @@ def _policy_contract_metadata(env_cfg: DirectRLEnvCfg, policy_nn: torch.nn.Modul
 
     return {
         "contract_version": str(getattr(env_cfg, "policy_contract_version", "unknown")),
+        "checkpoint_compatible_with_older_contracts": False,
         "checkpoint_compatible_with_v1": False,
+        "checkpoint_compatible_with_v2": False,
         "control_period_s": float(step_dt),
         "observation_dim": observation_dim,
         "action_dim": action_dim,
@@ -215,6 +229,8 @@ def _policy_contract_metadata(env_cfg: DirectRLEnvCfg, policy_nn: torch.nn.Modul
             {"range": [52, 56], "actor": "phase_sin_phase_cos_move_gate_stand_gate"},
         ],
         "navigation": {
+            "forward_speed_formula": "clamp(k_rho*rho,0,max_forward)*max(cos(alpha),0)",
+            "heading_blend_applies_to_forward_speed": False,
             "max_forward_speed_m_s": float(env_cfg.command_max_forward_speed_m_s),
             "max_yaw_rate_rad_s": float(env_cfg.command_max_yaw_rate_rad_s),
             "k_rho": float(env_cfg.command_k_rho),
@@ -244,6 +260,27 @@ def _policy_contract_metadata(env_cfg: DirectRLEnvCfg, policy_nn: torch.nn.Modul
                 float(env_cfg.gait_duty_factor_min_speed),
                 float(env_cfg.gait_duty_factor_max_speed),
             ],
+        },
+        "training_curriculum": {
+            "anchor_progress": [0.0, 0.20, 0.45, 0.70, 1.0],
+            "goal_ranges_m": {
+                "stand": list(env_cfg.goal_stand_distance_range),
+                "short": list(env_cfg.goal_short_distance_range),
+                "walk": list(env_cfg.goal_walk_distance_range),
+            },
+            "goal_classes_present_from_first_anchor": True,
+            "values_interpolated_between_anchors": True,
+        },
+        "training_goal_watchdog": {
+            "initial_window_s": float(env_cfg.goal_watchdog_initial_window_s),
+            "progress_window_s": float(env_cfg.goal_watchdog_progress_window_s),
+            "exempt_distance_m": float(env_cfg.goal_watchdog_exempt_distance_m),
+            "push_cooldown_s": float(env_cfg.goal_watchdog_push_cooldown_s),
+            "required_progress_formula": "min(0.08,max(0.025,0.20*(checkpoint_rho-0.05)),checkpoint_rho-exempt_rho)",
+            "relative_divergence_margin_m": float(env_cfg.relative_position_divergence_margin_m),
+            "relative_divergence_duration_s": float(env_cfg.relative_position_divergence_duration_s),
+            "absolute_divergence_m": float(env_cfg.absolute_position_divergence_m),
+            "absolute_divergence_duration_s": float(env_cfg.absolute_position_divergence_duration_s),
         },
         "mocap": {
             "base_linear_velocity": "unfiltered_policy_rate_finite_difference",
@@ -284,7 +321,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if hasattr(env_cfg, "action_clip") and float(agent_cfg.clip_actions) != float(env_cfg.action_clip):
         raise ValueError(
             f"Runner clip_actions ({agent_cfg.clip_actions}) must match the environment action_clip "
-            f"({env_cfg.action_clip}) for policy contract v2."
+            f"({env_cfg.action_clip}) for policy contract v3."
         )
 
     # set the environment seed
@@ -330,7 +367,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             "video_length": args_cli.video_length,
             "disable_logger": True,
         }
-        print("[INFO] Recording videos during training.")
+        print("[INFO] Recording a video during evaluation.")
         print_dict(video_kwargs, nesting=4)
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
